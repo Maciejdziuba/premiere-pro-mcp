@@ -1,61 +1,61 @@
 # Feature Matrix
 
-This fork already has a broad Premiere MCP surface. The next work should make that surface safer to extend: clear module ownership, locale-resilient helpers, honest diagnostics, and validation that does not require opening Premiere unless a live check is explicitly planned.
+This fork already has a broad Premiere MCP surface. The goal now is safer extension: locale-resilient helpers, clear module ownership, diagnostics, and validation that does not require Premiere unless a live check is explicitly planned.
 
 Current source of truth:
 
 - `src/server.ts` registers tools by spreading 28 `get*Tools()` modules.
-- `tests/tools/tool-modules.test.ts` asserts the same 28 modules and a total of 267 tools.
-- `README.md` and `package.json` still advertise 269 tools; treat that as documentation drift to reconcile in a separate metadata/docs pass.
+- `tests/tools/tool-modules.test.ts` and `npm run validate:tools` validate the catalog.
+- After Agent G, the implementation exposes 269 tools across 28 modules, matching README/package metadata.
 
-## Current Module Inventory
+## Current module inventory
 
 | Module | Tools | Existing category | Primary owner | Notes |
 |---|---:|---|---|---|
-| `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching `set_color_value`, `remove_all_effects`, or export/project helpers. |
-| `src/tools/audio.ts` | 3 | Dedicated audio levels/keyframes/mute | E | Small surface; audio property lookup needs shared helper support. |
+| `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching color/effect/export helpers. |
+| `src/tools/audio.ts` | 3 | Dedicated audio levels/keyframes/mute | E | Small surface; audio property lookup should use shared helpers. |
 | `src/tools/captions.ts` | 1 | Caption track creation | F | Caption import/edit/export remains thin. |
-| `src/tools/clipboard.ts` | 6 | Effect copy, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Uses display-name matching; helper migration is a likely conflict. |
+| `src/tools/clipboard.ts` | 6 | Effect copy, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Uses display-name matching in places. |
 | `src/tools/discovery.ts` | 10 | Project, item, sequence, clip discovery | G | Read-oriented foundation for safe planning. |
-| `src/tools/effects.ts` | 8 | Video/audio effects, Lumetri basics, LUT, stabilization | F, with D owning Lumetri/color | Highest D/F overlap; do not mix generic effects and Lumetri changes in one branch. |
-| `src/tools/export.ts` | 12 | Export, frame capture, interchange, AME/proxy operations | F | Some operations need live AME/Premiere validation beyond unit tests. |
-| `src/tools/health.ts` | 2 | Fork ping and bridge health | G | `fork_ping` is no-Premiere; `ping` touches the bridge. |
-| `src/tools/inspection.ts` | 10 | Deep read-only project/sequence/clip reports | G | Best place for diagnostics and live-read sweep outputs. |
-| `src/tools/keyframes.ts` | 8 | Effect property and keyframe CRUD | D, with B helper dependency | Partly uses `matchName`; property lookup still needs shared helper coverage. |
-| `src/tools/markers.ts` | 4 | Sequence and clip markers | C/G | Editing behavior is C; reporting/diagnostics is G. |
-| `src/tools/media.ts` | 16 | Import, bins, relink, proxy, interpretation | F | Project-panel destructive tools need clear errors and tests. |
-| `src/tools/metadata.ts` | 9 | Metadata, labels, XMP, footage interpretation, color space | F/G | Data mutation is F; reporting/diagnostics is G. |
+| `src/tools/effects.ts` | 8 | Video/audio effects, Lumetri basics, LUT, stabilization | F, with D owning Lumetri/color | Highest D/F overlap. |
+| `src/tools/export.ts` | 12 | Export, frame capture, interchange, AME/proxy operations | F | Needs live AME/Premiere validation beyond unit tests. |
+| `src/tools/health.ts` | 4 | Fork ping, bridge diagnostics, live health/runtime diagnostics | G | `fork_ping` and `bridge_diagnostics` do not contact Premiere; `ping` and runtime diagnostics do. |
+| `src/tools/inspection.ts` | 10 | Deep read-only project/sequence/clip reports | G | Used by safe runtime sweep. |
+| `src/tools/keyframes.ts` | 8 | Effect property and keyframe CRUD | D, with B helper dependency | Property lookup should migrate to shared helpers. |
+| `src/tools/markers.ts` | 4 | Sequence and clip markers | C/G | Editing behavior is C; reporting is G. |
+| `src/tools/media.ts` | 16 | Import, bins, relink, proxy, interpretation | F | Project-panel destructive tools need clear live-test boundaries. |
+| `src/tools/metadata.ts` | 9 | Metadata, labels, XMP, footage interpretation, color space | F/G | Data mutation is F; reporting is G. |
 | `src/tools/playback.ts` | 4 | Timeline/source playback | C | Uses QE for timeline playback. |
 | `src/tools/playhead.ts` | 6 | CTI, work area, sequence in/out | C | Shared by editing and export workflows. |
-| `src/tools/project-manager.ts` | 1 | Consolidate/transfer | F | High-risk live operation; keep mocked tests plus explicit live notes. |
-| `src/tools/project.ts` | 25 | Project lifecycle, bins, ingest, import, scratch disks | F/G | Several operations affect files/global-like project state; document live-test needs. |
-| `src/tools/scripting.ts` | 6 | Custom ExtendScript, DOM inspection, state snapshots | G, with B safety constraints | Raw script paths must remain explicit opt-in. |
-| `src/tools/selection.ts` | 7 | Clip selection utilities | C | Selection state is shared mutable Premiere state; re-query after edits. |
-| `src/tools/sequence.ts` | 11 | Sequence creation/settings/nesting/interchange helpers | C/F | C owns timeline behavior; F owns export/interchange-facing helpers. |
+| `src/tools/project-manager.ts` | 1 | Consolidate/transfer | F | High-risk live operation; disposable projects only. |
+| `src/tools/project.ts` | 25 | Project lifecycle, bins, ingest, import, scratch disks | F/G | Several operations affect files/project state. |
+| `src/tools/scripting.ts` | 6 | Custom ExtendScript, DOM inspection, state snapshots | G, with B safety constraints | Raw script paths stay explicit opt-in. |
+| `src/tools/selection.ts` | 7 | Clip selection utilities | C | Selection state is mutable; re-query after edits. |
+| `src/tools/sequence.ts` | 11 | Sequence creation/settings/nesting/interchange helpers | C/F | C owns timeline behavior; F owns export-facing helpers. |
 | `src/tools/source-monitor.ts` | 7 | Source monitor and 3-point edits | C | Depends on target-track behavior. |
 | `src/tools/text.ts` | 3 | Text overlays and MOGRT import | F | Graphics/MOGRT properties may need helper lookup. |
 | `src/tools/timeline.ts` | 10 | Add/remove/move/trim/split/duplicate/enable/replace/speed | C | Core editing surface. |
-| `src/tools/track-targeting.ts` | 31 | Track targeting, clip transforms/audio props, batch operations, version info | C, with D/E/G coordination | Largest mixed module; Motion/Opacity/Volume property lookup should wait for B helpers. |
+| `src/tools/track-targeting.ts` | 31 | Track targeting, clip transforms/audio props, batch operations, version info | C, with D/E/G coordination | Largest mixed module; Motion/Opacity/Volume lookup should use B helpers. |
 | `src/tools/tracks.ts` | 4 | Track add/delete/lock/visibility | C | Track delete/visibility should keep explicit errors. |
 | `src/tools/transitions.ts` | 5 | Video/audio transition add/list/batch | F/E | Audio transition behavior coordinates with E. |
-| `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer moving new broad features to a better-owned module. |
+| `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer better-owned modules for new broad features. |
 | `src/tools/workspace.ts` | 2 | Workspace list/switch | G | Diagnostics/workflow support. |
 
-Total: 267 tools across 28 modules.
+Total: 269 tools across 28 modules.
 
-## Missing Target Categories
+## Missing target categories
 
-| Target | Desired result | Primary owner | Current gap |
+| Target | Desired result | Primary owner | Current gap/status |
 |---|---|---|---|
-| Locale-resilient component/property lookup | Shared helpers that match by `matchName` first, localized display name second, including nested property groups | B | Current modules often hard-code English `displayName` values such as Motion, Opacity, Volume, Lumetri Color, and Blend Mode. |
-| Timeline/sequence breadth | Safer move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists, but QE/index-based operations need clearer failure modes and live-validation notes. |
+| Locale-resilient component/property lookup | Shared helpers that match by `matchName` first, localized display name second, including nested property groups | B | Added in `src/bridge/script-builder.ts` and documented in `LOCALE_HELPERS.md`; C/D/E/F should migrate tools to use it. |
+| Timeline/sequence breadth | Safer add/move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists; QE/index-based operations need clearer failure modes and live notes. |
 | Lumetri/color breadth | Fuller Lumetri controls, LUT handling, grade copy/paste, batch color application | D | Current coverage is basic `color_correct`, `apply_lut`, `set_color_value`, and generic keyframe/property tools. |
-| Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` has 3 tools; additional audio behavior is scattered in `track-targeting.ts`, `effects.ts`, `transitions.ts`, and `export.ts`. |
-| Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Existing tools cover basics, but many paths need helper lookup and live validation. |
-| Diagnostics/testing/docs | Bridge/version/locale readouts, safe read-only runtime sweep, schema validation, live-test notes | G | Structural tests are mocked; live coverage must be explicit and should not start Premiere automatically. |
+| Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` has 3 tools; additional audio behavior is scattered elsewhere. |
+| Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Existing tools cover basics; many paths need helper lookup and live validation. |
+| Diagnostics/testing/docs | Bridge/version/locale readouts, safe read-only runtime sweep, schema validation, live-test notes | G | Added `bridge_diagnostics`, `get_premiere_runtime_diagnostics`, `validate:tools`, and `diagnostics:sweep`. |
 | Architecture map | Keep counts, ownership, helper assignments, and conflict boundaries current | A | This file is the coordination point; update it when tools/modules are added. |
 
-## Helper Workstreams
+## Helper workstreams
 
 | Agent | Branch/worktree | Files owned first | Validation | Stop condition |
 |---|---|---|---|---|
@@ -65,22 +65,40 @@ Total: 267 tools across 28 modules.
 | D - Lumetri/color tools | `agent-d-lumetri-color` | Lumetri/color paths in `effects.ts`, `keyframes.ts`, `clipboard.ts`, `advanced.ts`, `track-targeting.ts` | `npm run build && npm test` | Color controls work through helper lookup or limitations are documented. |
 | E - Audio tools | `agent-e-audio-tools` | `audio.ts`, audio paths in `track-targeting.ts`, `effects.ts`, `transitions.ts`, `export.ts` | `npm run build && npm test` | Feasible audio tools are added; unsupported APIs return clear errors. |
 | F - Effects/media/export/captions | `agent-f-effects-export` | `effects.ts` non-Lumetri paths, `transitions.ts`, `captions.ts`, `export.ts`, `media.ts`, `project.ts`, `project-manager.ts`, `text.ts`, `metadata.ts` | `npm run build && npm test` | Feature group improves without taking over Lumetri/audio-specific behavior. |
-| G - Diagnostics/testing/docs | `agent-g-diagnostics-docs` | `health.ts`, `inspection.ts`, `discovery.ts`, `scripting.ts`, `workspace.ts`, `tests/`, `scripts/`, docs | `npm run build && npm test` plus any new validation script | Diagnostics/docs/validation pass; live-test needs are listed without starting Premiere automatically. |
+| G - Diagnostics/testing/docs | `agent-g-diagnostics-docs` | `health.ts`, `inspection.ts`, `discovery.ts`, `scripting.ts`, `workspace.ts`, `tests/`, `scripts/`, docs | `npm run build && npm test && npm run validate:tools && npm run diagnostics:sweep -- --dry-run` | Diagnostics/docs/validation pass; live-test needs are listed without starting Premiere automatically. |
 
-## Safe Extension Patterns
+## Diagnostics status
 
-- Add tools to the closest existing module. Add a new module only when the behavior has a distinct ownership boundary, then update `src/server.ts`, `tests/tools/tool-modules.test.ts`, this matrix, and any public count docs together.
+Static/runtime-safe diagnostics now cover:
+
+- `fork_ping`: fork metadata without Premiere or CEP.
+- `bridge_diagnostics`: package version, Node runtime, effective bridge temp directory, timeout, pending `cmd_`/`res_` files, and warnings without contacting Premiere.
+- `ping`: live CEP/Premiere connectivity plus Premiere version/build, ExtendScript locale/OS, project, active sequence, and QE availability readout.
+- `get_premiere_runtime_diagnostics`: read-only live runtime details for version/locale validation, BridgeTalk identifiers, project/sequence state, and capability probes without enabling QE.
+- `npm run validate:tools`: built catalog validation for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema metadata.
+- `npm run diagnostics:sweep`: read-only live sweep. Defaults to local bridge diagnostics plus lightweight live version/locale/runtime checks; `--include-project` adds project overview, timeline summary, and offline-media reads.
+
+Remaining live validation:
+
+- Run `npm run diagnostics:sweep` with Premiere open, MCP Bridge running, and `PREMIERE_TEMP_DIR` matching the panel.
+- Run `npm run diagnostics:sweep -- --include-project` on a small known project.
+- Capture at least one non-English Premiere UI locale.
+- Confirm `bridge_diagnostics` reports stale `cmd_`/`res_` files after a forced bridge interruption, then verify cleanup on restart.
+
+## Safe extension patterns
+
+- Add tools to the closest existing module. Add a new module only when the behavior has a distinct ownership boundary; then update `src/server.ts`, `tests/tools/tool-modules.test.ts`, this matrix, and public count docs together.
 - Keep every generated ExtendScript snippet ES3-compatible: `var`, classic functions, manual loops, no `let`, `const`, arrow functions, optional chaining, or modern array helpers.
 - Use `buildToolScript()` for Premiere commands and return `__result(...)` or `__error(...)` from the script. Use `sendCommand()` for validated bridge execution.
-- Escape every user-controlled string with `escapeForExtendScript()` before embedding it in ExtendScript. Do not build scripts with raw interpolation unless the value is numeric/boolean and already validated.
+- Escape every user-controlled string with `escapeForExtendScript()` before embedding it in ExtendScript.
 - Reserve `sendRawCommand()` for the explicit scripting escape hatch. New normal tools should not bypass script validation.
-- Prefer `matchName`-first component/property lookup once B lands the shared helpers. Until then, tools that depend on English display names should say so in errors or docs.
+- Prefer the B helper layer for component/property/effect/transition lookup: `matchName` first, localized display name second.
 - Mark QE DOM tools in descriptions, call `app.enableQE()` inside the script, and re-query project/sequence state after QE/index-based edits.
 - Return honest unsupported-state errors instead of silently succeeding. If an API requires a live Premiere/AME check, mark it as needing live validation.
-- Keep no-Premiere helpers such as `fork_ping` direct and deterministic; all Premiere-mutating tools should go through the bridge.
+- Keep no-Premiere helpers direct and deterministic; all Premiere-mutating tools should go through the bridge.
 - Do not start Premiere, run CEP install scripts, or modify global MCP/Adobe config from automated validation.
 
-## Conflict Boundaries
+## Conflict boundaries
 
 - No helper edits `src/server.ts` unless adding a brand-new module; pause for orchestrator review first.
 - B owns `src/bridge/script-builder.ts`; C/D/E/F should consume helper names only after B lands.
@@ -91,18 +109,19 @@ Total: 267 tools across 28 modules.
 - Do not delete, skip, weaken, or narrow tests. When tool counts change, increase the expected total and module minimums deliberately.
 - Unsupported Premiere APIs should return clear errors and be tagged in docs or tests as `needs live validation`.
 
-## Validation Commands
+## Validation commands
 
 | Scope | Command | Notes |
 |---|---|---|
-| A docs/matrix-only pass | `npm run build` | Required for this branch; confirms TypeScript still compiles after doc-only changes. |
+| A docs/matrix-only pass | `npm run build` | Confirms TypeScript still compiles after doc-only changes. |
 | Source tool/helper changes | `npm run build && npm test` | Unit tests mock bridge I/O and do not require Premiere. |
-| New module registration | `npm run build && npm test` | Also update `src/server.ts`, `tests/tools/tool-modules.test.ts`, this matrix, and count docs. |
-| Live Premiere/AME behavior | Manual live checklist only after explicit approval | Do not start Premiere or install CEP from helper automation. |
+| Catalog/schema check | `npm run validate:tools` | Uses built `dist/`; run after `npm run build`. |
+| Runtime-safe dry run | `npm run diagnostics:sweep -- --dry-run` | Verifies sweep wiring without contacting Premiere. |
+| Live read-only check | `npm run diagnostics:sweep` | Only with Premiere/CEP already running and temp dir aligned. |
+| Project read-only check | `npm run diagnostics:sweep -- --include-project` | Use a disposable/scratch project. |
 
-## Merge Risks
+## Merge risks
 
-- Count drift: code/tests currently say 267 tools, while README/package metadata say 269.
 - Shared helper order: B should land before D/E/F migrate property/effect lookup, or those branches will duplicate lookup code.
 - Mixed files: `advanced.ts`, `effects.ts`, `track-targeting.ts`, and `utility.ts` can conflict across C/D/E/F/G.
 - QE DOM behavior is version-sensitive and stateful; mocked tests do not prove live Premiere behavior.

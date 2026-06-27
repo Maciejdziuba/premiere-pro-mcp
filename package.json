@@ -24,6 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "validate:tools": "node scripts/validate-tool-catalog.mjs",
+    "diagnostics:sweep": "node scripts/safe-runtime-sweep.mjs",
     "install-cep": "bash scripts/install-cep.sh"
   },
   "repository": {

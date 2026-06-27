@@ -21,6 +21,17 @@ npm test
 
 `npm test` is a fast Vitest suite with bridge I/O mocked. It does not require Premiere Pro.
 
+Additional diagnostics checks:
+
+```bash
+npm run validate:tools
+npm run diagnostics:sweep -- --dry-run
+```
+
+`npm run validate:tools` imports the built `dist/tools/*.js` catalog, so run `npm run build` first. It validates the 269-tool catalog for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema property metadata.
+
+`npm run diagnostics:sweep -- --dry-run` verifies the runtime sweep command path without importing `dist/` or contacting Premiere.
+
 ## Local MCP Config Example
 
 This tells an MCP client (such as Claude Code) how to launch the built server. A repo-local copy lives at [`.mcp.local.example.json`](.mcp.local.example.json).
@@ -50,6 +61,37 @@ claude mcp add premiere-pro-local --env PREMIERE_TEMP_DIR=/var/folders/5k/c8kmwp
 ```
 
 Do not run the command unless you want to modify Claude Code's MCP config.
+
+## Diagnostics And Live Validation
+
+New read-only diagnostics tools:
+
+- `fork_ping`: local fork metadata; no Premiere or CEP required.
+- `bridge_diagnostics`: local file-bridge state, package version, Node runtime, effective temp directory, timeout, and pending `cmd_`/`res_` files; no Premiere or CEP required.
+- `ping`: live CEP/Premiere connectivity with Premiere version/build, ExtendScript locale/OS, project, active sequence, and QE availability metadata.
+- `get_premiere_runtime_diagnostics`: live read-only runtime detail for version/locale checks, BridgeTalk identifiers, project/sequence state, and capability probes. It does not enable QE.
+
+Safe runtime sweep:
+
+```bash
+npm run build
+PREMIERE_TEMP_DIR="/path/shown/in/MCP/Bridge/panel" npm run diagnostics:sweep
+```
+
+Use `--include-project` only when a small known project is open and project scans are acceptable:
+
+```bash
+PREMIERE_TEMP_DIR="/path/shown/in/MCP/Bridge/panel" npm run diagnostics:sweep -- --include-project
+```
+
+The sweep is read-only by default. It does not install CEP, change global Adobe settings, enable QE, save projects, edit timelines, enqueue exports, relink media, or write project/media files. If Premiere or the CEP panel is not running, the live steps should fail with bridge timeout errors; that is a connectivity result, not a destructive test.
+
+Remaining live-test needs:
+
+- Run the default sweep with Premiere open and the MCP Bridge CEP panel polling the same `PREMIERE_TEMP_DIR`.
+- Run `--include-project` on a small sample project and confirm project overview, timeline summary, and offline-media reads are complete and read-only.
+- Capture at least one non-English UI locale to confirm `$.locale`, `app.isoLanguage` where exposed, and localized names are reported clearly.
+- Interrupt the bridge once to leave stale `cmd_`/`res_` files, confirm `bridge_diagnostics` reports them, then verify normal cleanup on the next server start.
 
 ## CEP Bridge Install Later
 
