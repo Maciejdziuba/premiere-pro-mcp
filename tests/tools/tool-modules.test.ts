@@ -253,12 +253,13 @@ describe("Tool Handler Behavior", () => {
       await (tools.get_premiere_runtime_diagnostics.handler as any)({});
 
       const script = mockedSendCommand.mock.calls[0][0];
-      expect(script).toContain("readOnly: true");
-      expect(script).toContain("premiereVersion");
-      expect(script).toContain("$.locale");
-      expect(script).toContain("BridgeTalk");
-      expect(script).toContain("enabledByThisTool: false");
-      expect(script).not.toMatch(/app\.enableQE\s*\(/);
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("readOnly: true");
+      expect(userCode).toContain("premiereVersion");
+      expect(userCode).toContain("$.locale");
+      expect(userCode).toContain("BridgeTalk");
+      expect(userCode).toContain("enabledByThisTool: false");
+      expect(userCode).not.toMatch(/app\.enableQE\s*\(/);
     });
   });
 
