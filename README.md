@@ -6,7 +6,7 @@
 
 **Give AI full control over Adobe Premiere Pro.**
 
-272 tools across 28 modules — the most comprehensive MCP server for video editing.
+279 tools across 28 modules — the most comprehensive MCP server for video editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
@@ -27,7 +27,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 "Add the B-roll clips to V2, apply a cross dissolve between each, color correct them to match the A-roll, and export a 1080p ProRes."
 ```
 
-The AI handles the entire workflow through 272 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
+The AI handles the entire workflow through 279 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
 
 ---
 
@@ -201,7 +201,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 ---
 
-## Tools (272)
+## Tools (279)
 
 ### Discovery & Inspection (10 + 10)
 
@@ -264,6 +264,19 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 | `set_keyframe_interpolation` | Linear / Hold / Bezier |
 | `get_value_at_time` | Query interpolated value at any time |
 | `set_color_value` | Set color properties on effects |
+
+### Audio (10 dedicated)
+
+| Tool | Description |
+|------|-------------|
+| `adjust_audio_levels` / `offset_audio_gain` | Set or offset clip Volume/Level in dB |
+| `add_audio_keyframes` / `add_audio_fade` | Automate clip levels and fades |
+| `set_audio_pan` | Set exposed clip pan/balance properties |
+| `apply_common_audio_effect` | Apply common QE audio effects by alias |
+| `add_audio_transition` | Add QE audio transitions at cut points |
+| `diagnose_audio_clipping_and_normalization` | Read timeline level risk and report unsupported raw peak limits |
+| `duck_audio_under_voiceover` | Add ducking keyframes under voiceover regions |
+| `mute_track` | Mute or unmute audio tracks |
 
 ### Export & Encoding (14)
 
@@ -415,7 +428,7 @@ premiere-pro-mcp/
 ├── src/
 │   ├── index.ts                 # Entry point — stdio transport setup
 │   ├── http-server.ts           # Entry point — HTTP/SSE transport (Fly.io / remote)
-│   ├── server.ts                # MCP server — registers all 272 tools + 2 resources
+│   ├── server.ts                # MCP server — registers all 279 tools + 2 resources
 │   ├── bridge/
 │   │   ├── file-bridge.ts       # File-based IPC (write .jsx, poll .json)
 │   │   └── script-builder.ts    # ExtendScript generator with ES3 helpers
@@ -427,7 +440,7 @@ premiere-pro-mcp/
 │   │   ├── timeline.ts          # Timeline clip operations
 │   │   ├── effects.ts           # Effect application and color correction
 │   │   ├── transitions.ts       # Transition management (QE DOM)
-│   │   ├── audio.ts             # Audio levels and keyframes
+│   │   ├── audio.ts             # Audio levels, gain, fades, effects, transitions, diagnostics
 │   │   ├── text.ts              # Text overlays and MOGRTs
 │   │   ├── markers.ts           # Sequence and clip markers
 │   │   ├── tracks.ts            # Track add/delete/lock/visibility

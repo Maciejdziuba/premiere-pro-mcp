@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
 
-const EXPECTED_TOOL_COUNT = 272;
+const EXPECTED_TOOL_COUNT = 279;
 const TOOL_NAME_PATTERN = /^[a-z][a-z0-9]*(_[a-z0-9]+)*$/;
 const VALID_PROPERTY_TYPES = new Set(["string", "number", "boolean", "array", "object"]);
 

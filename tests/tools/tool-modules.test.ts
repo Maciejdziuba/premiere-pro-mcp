@@ -67,7 +67,7 @@ const ALL_MODULES: Array<{
   { name: "timeline", getter: getTimelineTools, minTools: 8 },
   { name: "effects", getter: getEffectsTools, minTools: 9 },
   { name: "transitions", getter: getTransitionsTools, minTools: 3 },
-  { name: "audio", getter: getAudioTools, minTools: 2 },
+  { name: "audio", getter: getAudioTools, minTools: 10 },
   { name: "text", getter: getTextTools, minTools: 2 },
   { name: "markers", getter: getMarkerTools, minTools: 3 },
   { name: "tracks", getter: getTrackTools, minTools: 3 },
@@ -169,12 +169,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 272 tools", () => {
+  it("all modules together have 279 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(272);
+    expect(total).toBe(279);
   });
 
   it("there are 28 modules", () => {
@@ -417,6 +417,111 @@ describe("Tool Handler Behavior", () => {
       expect(userCode).toContain("if (!dryRun)");
       expect(userCode).toContain("seq.overwriteClip(item");
       expect(userCode).toContain("overwritten: !dryRun");
+    });
+  });
+
+  describe("audio tools", () => {
+    it("exposes dedicated audio tooling for gain, pan, fades, effects, transitions, diagnostics, and ducking", () => {
+      const tools = getAudioTools(bridgeOptions);
+      expect(Object.keys(tools)).toEqual(expect.arrayContaining([
+        "adjust_audio_levels",
+        "offset_audio_gain",
+        "set_audio_pan",
+        "add_audio_keyframes",
+        "add_audio_fade",
+        "apply_common_audio_effect",
+        "add_audio_transition",
+        "diagnose_audio_clipping_and_normalization",
+        "duck_audio_under_voiceover",
+        "mute_track",
+      ]));
+    });
+
+    it("adjust_audio_levels uses the shared Volume/Level helper lookup", async () => {
+      const tools = getAudioTools(bridgeOptions);
+      await (tools.adjust_audio_levels.handler as any)({ node_id: "audio-1", level_db: -6 });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("__mcpFindAudioLevel");
+      expect(userCode).toContain("__findVolumeComponent");
+      expect(userCode).toContain("__findKnownProperty");
+      expect(userCode).not.toContain('displayName === "Volume"');
+    });
+
+    it("add_audio_keyframes uses Time objects and addKey for Volume/Level automation", async () => {
+      const tools = getAudioTools(bridgeOptions);
+      await (tools.add_audio_keyframes.handler as any)({
+        node_id: "audio-1",
+        keyframes: [
+          { time_seconds: 0, level_db: -96 },
+          { time_seconds: 1, level_db: 0 },
+        ],
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__mcpEnableAudioKeyframes");
+      expect(script).toContain("var time = new Time()");
+      expect(script).toContain("levelProp.addKey(time)");
+      expect(script).toContain("levelProp.setValueAtKey(time, levelDb, true)");
+    });
+
+    it("apply_common_audio_effect uses audio QE lookup and rejects video-track clip ids", async () => {
+      const tools = getAudioTools(bridgeOptions);
+      await (tools.apply_common_audio_effect.handler as any)({
+        node_id: "audio-1",
+        effect: "hard_limiter",
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__findAudioEffect");
+      expect(script).toContain("addAudioEffect");
+      expect(script).toContain('result.trackType !== "audio"');
+      expect(script).toContain("liveValidationNeeded: true");
+    });
+
+    it("add_audio_transition uses QE audio transition lookup", async () => {
+      const tools = getAudioTools(bridgeOptions);
+      await (tools.add_audio_transition.handler as any)({
+        transition_name: "Constant Power",
+        track_index: 0,
+        cut_point_seconds: 3,
+        duration_seconds: 0.5,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__findAudioTransition");
+      expect(script).toContain("qeSeq.getAudioTrackAt(0)");
+      expect(script).toContain("qeTrack.addTransition");
+    });
+
+    it("diagnose_audio_clipping_and_normalization is read-only and honest about raw peak limits", async () => {
+      const tools = getAudioTools(bridgeOptions);
+      await (tools.diagnose_audio_clipping_and_normalization.handler as any)({});
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("readOnly: true");
+      expect(userCode).toContain("rawPeakAnalysisSupported: false");
+      expect(userCode).toContain("destructiveNormalizationSupported: false");
+      expect(userCode).not.toMatch(/app\.enableQE\s*\(/);
+    });
+
+    it("duck_audio_under_voiceover creates clip-relative ducking keyframes", async () => {
+      const tools = getAudioTools(bridgeOptions);
+      await (tools.duck_audio_under_voiceover.handler as any)({
+        voice_track_index: 1,
+        target_track_indices: [0, 2],
+        duck_db: -20,
+        fade_seconds: 0.2,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("var targetIndices = [0, 2]");
+      expect(script).toContain("voiceSegments");
+      expect(script).toContain("__mcpAddAudioLevelKey");
+      expect(script).toContain("localIn = overlapStart - clipStart");
+      expect(script).toContain("keyframesAdded += 4");
     });
   });
 
