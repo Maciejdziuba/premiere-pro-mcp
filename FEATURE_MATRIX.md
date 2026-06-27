@@ -6,14 +6,14 @@ Current source of truth:
 
 - `src/server.ts` registers tools by spreading 28 `get*Tools()` modules.
 - `tests/tools/tool-modules.test.ts` and `npm run validate:tools` validate the catalog.
-- After Agent G, the implementation exposes 269 tools across 28 modules, matching README/package metadata.
+- After Agent E, the implementation exposes 276 tools across 28 modules, matching README/package metadata.
 
 ## Current module inventory
 
 | Module | Tools | Existing category | Primary owner | Notes |
 |---|---:|---|---|---|
 | `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching color/effect/export helpers. |
-| `src/tools/audio.ts` | 3 | Dedicated audio levels/keyframes/mute | E | Small surface; audio property lookup should use shared helpers. |
+| `src/tools/audio.ts` | 10 | Dedicated audio levels/gain, fades, pan, keyframes, common effects, audio transitions, diagnostics, ducking, mute | E | Uses shared helper lookup for Volume/Level, QE helpers for audio effects/transitions, and honest errors for unsupported raw peak/normalization APIs. |
 | `src/tools/captions.ts` | 1 | Caption track creation | F | Caption import/edit/export remains thin. |
 | `src/tools/clipboard.ts` | 6 | Effect copy, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Uses display-name matching in places. |
 | `src/tools/discovery.ts` | 10 | Project, item, sequence, clip discovery | G | Read-oriented foundation for safe planning. |
@@ -41,7 +41,7 @@ Current source of truth:
 | `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer better-owned modules for new broad features. |
 | `src/tools/workspace.ts` | 2 | Workspace list/switch | G | Diagnostics/workflow support. |
 
-Total: 269 tools across 28 modules.
+Total: 276 tools across 28 modules.
 
 ## Missing target categories
 
@@ -50,7 +50,7 @@ Total: 269 tools across 28 modules.
 | Locale-resilient component/property lookup | Shared helpers that match by `matchName` first, localized display name second, including nested property groups | B | Added in `src/bridge/script-builder.ts` and documented in `LOCALE_HELPERS.md`; C/D/E/F should migrate tools to use it. |
 | Timeline/sequence breadth | Safer add/move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists; QE/index-based operations need clearer failure modes and live notes. |
 | Lumetri/color breadth | Fuller Lumetri controls, LUT handling, grade copy/paste, batch color application | D | Current coverage is basic `color_correct`, `apply_lut`, `set_color_value`, and generic keyframe/property tools. |
-| Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` has 3 tools; additional audio behavior is scattered elsewhere. |
+| Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` now covers feasible clip Volume/Level gain offsets, fades, pan, keyframes, common QE audio effects, QE audio transitions, timeline-level clipping/normalization diagnostics, and voiceover ducking. Raw waveform peak, LUFS, and destructive normalization remain unsupported through ExtendScript and return explicit diagnostics instead of fake success. |
 | Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Existing tools cover basics; many paths need helper lookup and live validation. |
 | Diagnostics/testing/docs | Bridge/version/locale readouts, safe read-only runtime sweep, schema validation, live-test notes | G | Added `bridge_diagnostics`, `get_premiere_runtime_diagnostics`, `validate:tools`, and `diagnostics:sweep`. |
 | Architecture map | Keep counts, ownership, helper assignments, and conflict boundaries current | A | This file is the coordination point; update it when tools/modules are added. |
@@ -84,6 +84,7 @@ Remaining live validation:
 - Run `npm run diagnostics:sweep -- --include-project` on a small known project.
 - Capture at least one non-English Premiere UI locale.
 - Confirm `bridge_diagnostics` reports stale `cmd_`/`res_` files after a forced bridge interruption, then verify cleanup on restart.
+- Live-check audio automation on a disposable sequence: Volume/Level keyframe time basis, Panner exposure on mono/stereo clips, QE common audio effect lookup, QE audio transition insertion, and voiceover ducking keyframe placement.
 
 ## Safe extension patterns
 
