@@ -301,7 +301,7 @@
 
 ## Implementation Status — Priority List
 
-**Total tools: 269 across 28 modules** (up from 228 across 23 modules)
+**Total tools: 278 across 28 modules** (up from 228 across 23 modules)
 
 ### P0 — Critical ✅ ALL IMPLEMENTED
 1. ~~**`create_project`**~~ — ❌ Intentionally skipped (requires UXP, not available via ExtendScript CEP)

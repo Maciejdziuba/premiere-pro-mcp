@@ -6,7 +6,7 @@ Current source of truth:
 
 - `src/server.ts` registers tools by spreading 28 `get*Tools()` modules.
 - `tests/tools/tool-modules.test.ts` and `npm run validate:tools` validate the catalog.
-- After Agents D and E, the implementation exposes 279 tools across 28 modules, matching README/package metadata.
+- After Agents D, E, and F, the implementation exposes 288 tools across 28 modules, matching README/package metadata.
 
 ## Current module inventory
 
@@ -14,11 +14,11 @@ Current source of truth:
 |---|---:|---|---|---|
 | `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching color/effect/export helpers. |
 | `src/tools/audio.ts` | 10 | Dedicated audio levels/gain, fades, pan, keyframes, common effects, audio transitions, diagnostics, ducking, mute | E | Uses shared helper lookup for Volume/Level, QE helpers for audio effects/transitions, and honest errors for unsupported raw peak/normalization APIs. |
-| `src/tools/captions.ts` | 1 | Caption track creation | F | Caption import/edit/export remains thin. |
+| `src/tools/captions.ts` | 5 | Caption/SRT helpers and caption track creation | F | Local SRT parse/write does not require Premiere; caption edit/export API exposure still needs live validation. |
 | `src/tools/clipboard.ts` | 8 | Effect copy, Lumetri grade copy/paste, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Lumetri grade tools use helper lookup; generic effect copy still needs broader migration. |
 | `src/tools/discovery.ts` | 10 | Project, item, sequence, clip discovery | G | Read-oriented foundation for safe planning. |
 | `src/tools/effects.ts` | 9 | Video/audio effects, fuller Lumetri controls, LUT, batch color, stabilization | F, with D owning Lumetri/color | Highest D/F overlap; optional Lumetri Creative/Vignette controls need live validation. |
-| `src/tools/export.ts` | 12 | Export, frame capture, interchange, AME/proxy operations | F | Needs live AME/Premiere validation beyond unit tests. |
+| `src/tools/export.ts` | 16 | Export, frame capture, interchange, AME/proxy operations, export diagnostics, batch export helpers | F | Queue details remain limited by AME/Premiere scripting APIs; needs live AME/Premiere validation beyond unit tests. |
 | `src/tools/health.ts` | 4 | Fork ping, bridge diagnostics, live health/runtime diagnostics | G | `fork_ping` and `bridge_diagnostics` do not contact Premiere; `ping` and runtime diagnostics do. |
 | `src/tools/inspection.ts` | 10 | Deep read-only project/sequence/clip reports | G | Used by safe runtime sweep. |
 | `src/tools/keyframes.ts` | 8 | Effect property and keyframe CRUD | D, with B helper dependency | Property lookup should migrate to shared helpers. |
@@ -37,11 +37,11 @@ Current source of truth:
 | `src/tools/timeline.ts` | 10 | Add/remove/move/trim/split/duplicate/enable/replace/speed | C | Core editing surface. |
 | `src/tools/track-targeting.ts` | 31 | Track targeting, clip transforms/audio props, batch operations, version info | C, with D/E/G coordination | Largest mixed module; Motion/Opacity/Volume lookup should use B helpers. |
 | `src/tools/tracks.ts` | 4 | Track add/delete/lock/visibility | C | Track delete/visibility should keep explicit errors. |
-| `src/tools/transitions.ts` | 5 | Video/audio transition add/list/batch | F/E | Audio transition behavior coordinates with E. |
+| `src/tools/transitions.ts` | 6 | Video/audio transition lookup/add/list/batch | F/E | Video transition lookup now uses helper matchName/name resolution; audio transition behavior coordinates with E. |
 | `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer better-owned modules for new broad features. |
 | `src/tools/workspace.ts` | 2 | Workspace list/switch | G | Diagnostics/workflow support. |
 
-Total: 279 tools across 28 modules.
+Total: 288 tools across 28 modules.
 
 ## Missing target categories
 
@@ -51,7 +51,7 @@ Total: 279 tools across 28 modules.
 | Timeline/sequence breadth | Safer add/move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists; QE/index-based operations need clearer failure modes and live notes. |
 | Lumetri/color breadth | Fuller Lumetri controls, LUT handling, grade copy/paste, batch color application | D | Added `batch_color_correct`, `copy_lumetri_grade`, and `paste_lumetri_grade`; expanded `color_correct`/`apply_lut`; migrated color/keyframe lookup to shared helpers where feasible. Optional Creative/Vignette aliases need live Premiere validation. |
 | Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` now covers feasible clip Volume/Level gain offsets, fades, pan, keyframes, common QE audio effects, QE audio transitions, timeline-level clipping/normalization diagnostics, and voiceover ducking. Raw waveform peak, LUFS, and destructive normalization remain unsupported through ExtendScript and return explicit diagnostics instead of fake success. |
-| Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Existing tools cover basics; many paths need helper lookup and live validation. |
+| Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Transition lookup uses helper matchName/name resolution; batch video transitions report per-cut results; local SRT parse/write and caption import/capability diagnostics added; export preset/capability diagnostics and batch AME/interchange helpers added. Live AME/caption/interchange validation remains outstanding. |
 | Diagnostics/testing/docs | Bridge/version/locale readouts, safe read-only runtime sweep, schema validation, live-test notes | G | Added `bridge_diagnostics`, `get_premiere_runtime_diagnostics`, `validate:tools`, and `diagnostics:sweep`. |
 | Architecture map | Keep counts, ownership, helper assignments, and conflict boundaries current | A | This file is the coordination point; update it when tools/modules are added. |
 

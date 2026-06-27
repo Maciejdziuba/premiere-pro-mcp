@@ -20,7 +20,7 @@ export function HeroSection() {
       <div className="relative z-10 mb-6">
         <AnimatedGradientText>
           <Zap className="mr-2 inline h-4 w-4" />
-          269 tools &mdash; the most complete MCP server for video editing
+          278 tools &mdash; the most complete MCP server for video editing
         </AnimatedGradientText>
       </div>
 
@@ -86,7 +86,7 @@ export function HeroSection() {
               <span className="text-white"> color correct to match A-roll, export 1080p ProRes."</span>
               {"\n\n"}
               <span className="text-zinc-500">[premiere-pro-mcp] </span>
-              <span className="text-purple-400">Registered 269 tools + 2 resources ✓</span>
+              <span className="text-purple-400">Registered 278 tools + 2 resources ✓</span>
             </code>
           </pre>
         </div>

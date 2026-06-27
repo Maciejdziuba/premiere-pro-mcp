@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BridgeOptions } from "../../src/bridge/file-bridge.js";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // Mock sendCommand and sendRawCommand so tool handlers don't do real I/O
 vi.mock("../../src/bridge/file-bridge.js", () => ({
@@ -66,14 +69,14 @@ const ALL_MODULES: Array<{
   { name: "sequence", getter: getSequenceTools, minTools: 8 },
   { name: "timeline", getter: getTimelineTools, minTools: 8 },
   { name: "effects", getter: getEffectsTools, minTools: 9 },
-  { name: "transitions", getter: getTransitionsTools, minTools: 3 },
+  { name: "transitions", getter: getTransitionsTools, minTools: 6 },
   { name: "audio", getter: getAudioTools, minTools: 10 },
   { name: "text", getter: getTextTools, minTools: 2 },
   { name: "markers", getter: getMarkerTools, minTools: 3 },
   { name: "tracks", getter: getTrackTools, minTools: 3 },
   { name: "playhead", getter: getPlayheadTools, minTools: 4 },
   { name: "metadata", getter: getMetadataTools, minTools: 6 },
-  { name: "export", getter: getExportTools, minTools: 8 },
+  { name: "export", getter: getExportTools, minTools: 16 },
   { name: "advanced", getter: getAdvancedTools, minTools: 20 },
   { name: "keyframes", getter: getKeyframeTools, minTools: 5 },
   { name: "scripting", getter: getScriptingTools, minTools: 3 },
@@ -85,7 +88,7 @@ const ALL_MODULES: Array<{
   { name: "utility", getter: getUtilityTools, minTools: 15 },
   { name: "health", getter: getHealthTools, minTools: 4 },
   { name: "workspace", getter: getWorkspaceTools, minTools: 2 },
-  { name: "captions", getter: getCaptionTools, minTools: 1 },
+  { name: "captions", getter: getCaptionTools, minTools: 5 },
   { name: "playback", getter: getPlaybackTools, minTools: 3 },
   { name: "project-manager", getter: getProjectManagerTools, minTools: 1 },
 ];
@@ -169,12 +172,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 279 tools", () => {
+  it("all modules together have 288 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(279);
+    expect(total).toBe(288);
   });
 
   it("there are 28 modules", () => {
@@ -629,6 +632,124 @@ describe("Tool Handler Behavior", () => {
       expect(script).toContain("__result");
       expect(script).toContain("my-srt-file");
       expect(script).toContain("createCaptionTrack");
+    });
+
+    it("parse_srt_file reads local SRT without bridge I/O", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-srt-"));
+      const srtPath = join(tempDir, "sample.srt");
+
+      try {
+        writeFileSync(
+          srtPath,
+          "1\n00:00:01,000 --> 00:00:02,500\nHello world\n",
+          "utf-8"
+        );
+
+        const result = await (tools.parse_srt_file.handler as any)({ file_path: srtPath });
+
+        expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        expect(result.data.captionCount).toBe(1);
+        expect(result.data.captions[0]).toMatchObject({
+          startSeconds: 1,
+          endSeconds: 2.5,
+          text: "Hello world",
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("write_srt_file writes local SRT without bridge I/O", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-srt-"));
+      const srtPath = join(tempDir, "written.srt");
+
+      try {
+        const result = await (tools.write_srt_file.handler as any)({
+          output_path: srtPath,
+          captions: [{ start_seconds: 0, end_seconds: 1.25, text: "Line one" }],
+        });
+
+        expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        expect(existsSync(srtPath)).toBe(true);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("transition tools", () => {
+    it("find_transition uses matchName-aware helper lookup", async () => {
+      const tools = getTransitionsTools(bridgeOptions);
+
+      await (tools.find_transition.handler as any)({
+        transition_name: "Cross Dissolve",
+        transition_match_name: "ADBE Cross Dissolve",
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__findVideoTransition");
+      expect(script).toContain("ADBE Cross Dissolve");
+      expect(script).toContain("Cross Dissolve");
+    });
+
+    it("batch_add_transitions reports dry-run cut details", async () => {
+      const tools = getTransitionsTools(bridgeOptions);
+
+      await (tools.batch_add_transitions.handler as any)({
+        transition_name: "Cross Dissolve",
+        dry_run: true,
+        start_seconds: 1,
+        end_seconds: 10,
+        max_cuts: 3,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__findVideoTransition");
+      expect(script).toContain("var dryRun = true");
+      expect(script).toContain("cuts: cuts");
+      expect(script).toContain("failures: failures");
+    });
+  });
+
+  describe("export tools", () => {
+    it("get_export_capabilities reports encoder and interchange methods", async () => {
+      const tools = getExportTools(bridgeOptions);
+
+      await (tools.get_export_capabilities.handler as any)({});
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("detailedQueueStatus");
+      expect(script).toContain("exportAAF");
+      expect(script).toContain("exportOMF");
+      expect(script).toContain("exportAsMediaDirect");
+    });
+
+    it("diagnose_export_preset checks preset existence and extension without exporting", async () => {
+      const tools = getExportTools(bridgeOptions);
+
+      await (tools.diagnose_export_preset.handler as any)({ preset_path: "/tmp/test.epr" });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("getExportFileExtension");
+      expect(script).toContain("Preset file not found");
+      expect(script).toContain("exported: false");
+    });
+
+    it("batch_export_sequences queues jobs without starting by default", async () => {
+      const tools = getExportTools(bridgeOptions);
+
+      await (tools.batch_export_sequences.handler as any)({
+        jobs: [{ sequence_id: "seq-1", output_path: "/tmp/out.mp4", preset_path: "/tmp/preset.epr" }],
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("encoder.encodeSequence");
+      expect(script).toContain("started = false");
+      expect(script).toContain("Sequence not found");
     });
   });
 

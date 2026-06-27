@@ -32,7 +32,7 @@ const features = [
     icon: Code2,
     title: "Custom ExtendScript",
     description:
-      "Run any ExtendScript or QE DOM code on demand. The AI can write scripts to handle tasks beyond the built-in 269 tools.",
+      "Run any ExtendScript or QE DOM code on demand. The AI can write scripts to handle tasks beyond the built-in 278 tools.",
     color: "from-teal-500/20 to-teal-600/5",
     border: "#14b8a6",
   },
