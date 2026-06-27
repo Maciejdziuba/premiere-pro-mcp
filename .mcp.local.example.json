@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "premiere-pro-local": {
+      "command": "node",
+      "args": [
+        "/Users/maciejdziuba/Documents/Software /Premier Pro MCP Fork/dist/index.js"
+      ],
+      "env": {
+        "PREMIERE_TEMP_DIR": "/tmp/premiere-mcp-bridge"
+      }
+    }
+  }
+}
