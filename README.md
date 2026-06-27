@@ -6,7 +6,7 @@
 
 **Give AI full control over Adobe Premiere Pro.**
 
-269 tools across 28 modules — the most comprehensive MCP server for video editing.
+272 tools across 28 modules — the most comprehensive MCP server for video editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
@@ -27,7 +27,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 "Add the B-roll clips to V2, apply a cross dissolve between each, color correct them to match the A-roll, and export a 1080p ProRes."
 ```
 
-The AI handles the entire workflow through 269 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
+The AI handles the entire workflow through 272 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
 
 ---
 
@@ -201,7 +201,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 ---
 
-## Tools (269)
+## Tools (272)
 
 ### Discovery & Inspection (10 + 10)
 
@@ -244,14 +244,15 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 | `set_clip_properties` | Opacity, scale, rotation, position |
 | `link_selection` / `unlink_selection` | Link/unlink A/V |
 
-### Effects & Color (8)
+### Effects & Color (9)
 
 | Tool | Description |
 |------|-------------|
 | `apply_effect` / `apply_audio_effect` | Apply by name (QE) |
 | `remove_effect` / `remove_all_effects` | Remove effects |
-| `color_correct` | Lumetri: exposure, contrast, temperature, etc. |
-| `apply_lut` | Apply LUT files |
+| `color_correct` | Lumetri: exposure, contrast, temperature, tint, saturation, vibrance/sharpen/vignette where exposed |
+| `apply_lut` | Apply input or Creative LUT files |
+| `batch_color_correct` | Apply Lumetri corrections to selected clips, a video track, explicit node IDs, or all video clips |
 | `stabilize_clip` | Warp Stabilizer with configurable settings |
 
 ### Keyframes (8)
@@ -283,12 +284,13 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 | `play_timeline` / `stop_playback` | Playback control (QE) |
 | `play_source_monitor` | Play in source monitor |
 
-### Selection & Clipboard (7 + 6)
+### Selection & Clipboard (7 + 8)
 
 | Tool | Description |
 |------|-------------|
 | `select_clips_by_name` / `select_clips_in_range` | Smart selection |
 | `copy_effects_between_clips` | Copy effects via QE |
+| `copy_lumetri_grade` / `paste_lumetri_grade` | Copy and paste serializable Lumetri grades |
 | `batch_apply_effect` | Apply effect to multiple clips |
 | `set_blend_mode` | 27 blend modes |
 
@@ -413,7 +415,7 @@ premiere-pro-mcp/
 ├── src/
 │   ├── index.ts                 # Entry point — stdio transport setup
 │   ├── http-server.ts           # Entry point — HTTP/SSE transport (Fly.io / remote)
-│   ├── server.ts                # MCP server — registers all 269 tools + 2 resources
+│   ├── server.ts                # MCP server — registers all 272 tools + 2 resources
 │   ├── bridge/
 │   │   ├── file-bridge.ts       # File-based IPC (write .jsx, poll .json)
 │   │   └── script-builder.ts    # ExtendScript generator with ES3 helpers

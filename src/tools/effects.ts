@@ -1,5 +1,12 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
+import {
+  buildLumetriExtendScriptHelpers,
+  collectLumetriAdjustments,
+  extendScriptLiteral,
+  LUMETRI_CONTROL_PARAMETERS,
+  LumetriControlArgs,
+} from "./lumetri-helpers.js";
 
 export function getEffectsTools(bridgeOptions: BridgeOptions) {
   return {
@@ -24,21 +31,21 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
-          
+
           // Find the effect in QE
           var effectName = "${escapeForExtendScript(args.effect_name)}";
-          var qeTrack = result.trackType === "video" 
+          var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
-          
+
           if (!qeTrack) return __error("QE track not found");
-          
+
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           // Search for the effect
           var effects = qe.project.getVideoEffectList();
           var found = false;
@@ -49,7 +56,7 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
               break;
             }
           }
-          
+
           if (!found) return __error("Effect not found: " + effectName);
           return __result({ applied: true, effect: effectName, clipName: result.clip.name });
         `);
@@ -78,17 +85,17 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var effectName = "${escapeForExtendScript(args.effect_name)}";
           var qeTrack = qeSeq.getAudioTrackAt(result.trackIndex);
           if (!qeTrack) return __error("QE audio track not found");
-          
+
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           var effects = qe.project.getAudioEffectList();
           var found = false;
           for (var i = 0; i < effects.numItems; i++) {
@@ -98,7 +105,7 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
               break;
             }
           }
-          
+
           if (!found) return __error("Audio effect not found: " + effectName);
           return __result({ applied: true, effect: effectName });
         `);
@@ -130,7 +137,7 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var clip = result.clip;
           ${args.effect_index !== undefined ? `
           if (${args.effect_index} >= clip.components.numItems) return __error("Effect index out of range");
@@ -190,7 +197,7 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
     },
 
     color_correct: {
-      description: "Apply basic color correction to a clip using Lumetri Color",
+      description: "Apply Lumetri Color corrections to a clip using locale-resilient component/property lookup where Premiere exposes the properties",
       parameters: {
         type: "object" as const,
         properties: {
@@ -198,91 +205,49 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
             type: "string",
             description: "Node ID of the clip",
           },
-          exposure: { type: "number", description: "Exposure adjustment (-4.0 to 4.0)" },
-          contrast: { type: "number", description: "Contrast adjustment (-100 to 100)" },
-          highlights: { type: "number", description: "Highlights adjustment (-100 to 100)" },
-          shadows: { type: "number", description: "Shadows adjustment (-100 to 100)" },
-          whites: { type: "number", description: "Whites adjustment (-100 to 100)" },
-          blacks: { type: "number", description: "Blacks adjustment (-100 to 100)" },
-          temperature: { type: "number", description: "Color temperature adjustment" },
-          tint: { type: "number", description: "Tint adjustment" },
-          saturation: { type: "number", description: "Saturation (0-200, 100 = normal)" },
+          ...LUMETRI_CONTROL_PARAMETERS,
+          fail_on_missing: {
+            type: "boolean",
+            description: "Return an error when a requested Lumetri property is unavailable (default: true). Set false to skip unsupported optional controls.",
+          },
         },
         required: ["node_id"],
       },
-      handler: async (args: {
+      handler: async (args: LumetriControlArgs & {
         node_id: string;
-        exposure?: number;
-        contrast?: number;
-        highlights?: number;
-        shadows?: number;
-        whites?: number;
-        blacks?: number;
-        temperature?: number;
-        tint?: number;
-        saturation?: number;
+        fail_on_missing?: boolean;
       }) => {
-        // First apply Lumetri Color effect, then set its properties
+        const adjustments = collectLumetriAdjustments(args);
         const script = buildToolScript(`
-          app.enableQE();
-          var qeSeq = qe.project.getActiveSequence();
-          if (!qeSeq) return __error("No active sequence (QE)");
-          
+          ${buildLumetriExtendScriptHelpers()}
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
-          // Apply Lumetri Color if not already present
-          var clip = result.clip;
-          var hasLumetri = false;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Lumetri Color") {
-              hasLumetri = true;
-              break;
-            }
-          }
-          
-          if (!hasLumetri) {
-            var qeTrack = qeSeq.getVideoTrackAt(result.trackIndex);
-            var qeClip = qeTrack.getItemAt(result.clipIndex);
-            var effects = qe.project.getVideoEffectList();
-            for (var i = 0; i < effects.numItems; i++) {
-              if (effects[i].name === "Lumetri Color") {
-                qeClip.addVideoEffect(effects[i]);
-                break;
-              }
-            }
-          }
-          
-          // Set Lumetri properties
-          var changes = {};
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.displayName === "Lumetri Color") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                var prop = comp.properties[p];
-                var name = prop.displayName;
-                ${args.exposure !== undefined ? `if (name === "Exposure") { prop.setValue(${args.exposure}, true); changes.exposure = ${args.exposure}; }` : ""}
-                ${args.contrast !== undefined ? `if (name === "Contrast") { prop.setValue(${args.contrast}, true); changes.contrast = ${args.contrast}; }` : ""}
-                ${args.highlights !== undefined ? `if (name === "Highlights") { prop.setValue(${args.highlights}, true); changes.highlights = ${args.highlights}; }` : ""}
-                ${args.shadows !== undefined ? `if (name === "Shadows") { prop.setValue(${args.shadows}, true); changes.shadows = ${args.shadows}; }` : ""}
-                ${args.whites !== undefined ? `if (name === "Whites") { prop.setValue(${args.whites}, true); changes.whites = ${args.whites}; }` : ""}
-                ${args.blacks !== undefined ? `if (name === "Blacks") { prop.setValue(${args.blacks}, true); changes.blacks = ${args.blacks}; }` : ""}
-                ${args.temperature !== undefined ? `if (name === "Temperature") { prop.setValue(${args.temperature}, true); changes.temperature = ${args.temperature}; }` : ""}
-                ${args.tint !== undefined ? `if (name === "Tint") { prop.setValue(${args.tint}, true); changes.tint = ${args.tint}; }` : ""}
-                ${args.saturation !== undefined ? `if (name === "Saturation") { prop.setValue(${args.saturation}, true); changes.saturation = ${args.saturation}; }` : ""}
-              }
-              break;
-            }
-          }
-          
-          return __result({ colorCorrected: true, clipName: clip.name, changes: changes });
+
+          var values = ${extendScriptLiteral(adjustments)};
+          var applyResult = __mcpApplyLumetriValues(
+            result,
+            values,
+            ${args.fail_on_missing === false ? "false" : "true"},
+            true
+          );
+          if (!applyResult.ok) return __error(applyResult.error);
+
+          return __result({
+            colorCorrected: true,
+            clipName: result.clip.name,
+            appliedLumetri: applyResult.appliedLumetri,
+            changes: applyResult.changes,
+            skipped: applyResult.skipped,
+            liveValidationNeeded: applyResult.liveValidationNeeded
+          });
         `);
         return sendCommand(script, bridgeOptions);
       },
     },
 
     apply_lut: {
-      description: "Apply a LUT file to a clip via Lumetri Color",
+      description: "Apply an input or Creative LUT file to a clip via Lumetri Color using locale-resilient lookup where Premiere exposes the LUT property",
       parameters: {
         type: "object" as const,
         properties: {
@@ -294,58 +259,163 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
             type: "string",
             description: "Full path to the .cube or .3dl LUT file",
           },
+          lut_slot: {
+            type: "string",
+            enum: ["input", "creative"],
+            description: "Lumetri LUT slot to set: input/Input LUT or creative/Look (default: input)",
+          },
         },
         required: ["node_id", "lut_path"],
       },
-      handler: async (args: { node_id: string; lut_path: string }) => {
+      handler: async (args: { node_id: string; lut_path: string; lut_slot?: string }) => {
+        const propertyKey = args.lut_slot === "creative" ? "creative_lut" : "input_lut";
         const script = buildToolScript(`
-          app.enableQE();
+          ${buildLumetriExtendScriptHelpers()}
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
-          var clip = result.clip;
-          
-          // Find or apply Lumetri Color
-          var lumetriComp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "Lumetri Color") {
-              lumetriComp = clip.components[i];
-              break;
-            }
+
+          var values = {};
+          values["${propertyKey}"] = "${escapeForExtendScript(args.lut_path)}";
+          var applyResult = __mcpApplyLumetriValues(result, values, true, true);
+          if (!applyResult.ok) return __error(applyResult.error);
+
+          return __result({
+            lutApplied: true,
+            clipName: result.clip.name,
+            lutPath: "${escapeForExtendScript(args.lut_path)}",
+            lutSlot: "${args.lut_slot === "creative" ? "creative" : "input"}",
+            appliedLumetri: applyResult.appliedLumetri,
+            changes: applyResult.changes,
+            liveValidationNeeded: applyResult.liveValidationNeeded
+          });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    batch_color_correct: {
+      description: "Apply the same Lumetri Color corrections to selected clips, a video track, explicit node IDs, or all video clips",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          target: {
+            type: "string",
+            enum: ["selected", "track", "node_ids", "all"],
+            description: "Which video clips to color correct",
+          },
+          node_ids: {
+            type: "array",
+            description: "Clip node IDs to target when target is node_ids",
+          },
+          track_index: {
+            type: "number",
+            description: "Video track index when target is track (0-based, default: 0)",
+          },
+          ...LUMETRI_CONTROL_PARAMETERS,
+          fail_on_missing: {
+            type: "boolean",
+            description: "Return an error when a requested Lumetri property is unavailable on any target clip (default: true). Set false to skip unsupported optional controls.",
+          },
+        },
+        required: ["target"],
+      },
+      handler: async (args: LumetriControlArgs & {
+        target: string;
+        node_ids?: string[];
+        track_index?: number;
+        fail_on_missing?: boolean;
+      }) => {
+        const adjustments = collectLumetriAdjustments(args);
+        const target = args.target || "selected";
+        const trackIndex = args.track_index ?? 0;
+        const nodeIds = Array.isArray(args.node_ids) ? args.node_ids : [];
+
+        const script = buildToolScript(`
+          ${buildLumetriExtendScriptHelpers()}
+
+          var seq = app.project.activeSequence;
+          if (!seq) return __error("No active sequence");
+
+          var target = "${escapeForExtendScript(target)}";
+          var nodeIds = ${extendScriptLiteral(nodeIds)};
+          var targets = [];
+
+          function addVideoTarget(clip, trackIndex, clipIndex) {
+            targets.push({
+              clip: clip,
+              trackIndex: trackIndex,
+              clipIndex: clipIndex,
+              trackType: "video"
+            });
           }
-          
-          if (!lumetriComp) {
-            var qeSeq = qe.project.getActiveSequence();
-            var qeTrack = qeSeq.getVideoTrackAt(result.trackIndex);
-            var qeClip = qeTrack.getItemAt(result.clipIndex);
-            var effects = qe.project.getVideoEffectList();
-            for (var i = 0; i < effects.numItems; i++) {
-              if (effects[i].name === "Lumetri Color") {
-                qeClip.addVideoEffect(effects[i]);
-                break;
+
+          if (target === "node_ids") {
+            if (!nodeIds || nodeIds.length === 0) return __error("node_ids must include at least one clip when target is node_ids");
+            for (var n = 0; n < nodeIds.length; n++) {
+              var found = __findClip(String(nodeIds[n]));
+              if (!found) return __error("Clip not found: " + nodeIds[n]);
+              if (found.trackType !== "video") return __error("Lumetri Color can only be applied to video clips: " + nodeIds[n]);
+              targets.push(found);
+            }
+          } else if (target === "track") {
+            if (${trackIndex} >= seq.videoTracks.numTracks) return __error("Video track index out of range");
+            var track = seq.videoTracks[${trackIndex}];
+            for (var c = 0; c < track.clips.numItems; c++) {
+              addVideoTarget(track.clips[c], ${trackIndex}, c);
+            }
+          } else if (target === "all") {
+            for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+              var videoTrack = seq.videoTracks[t];
+              for (var vc = 0; vc < videoTrack.clips.numItems; vc++) {
+                addVideoTarget(videoTrack.clips[vc], t, vc);
               }
             }
-            // Re-find the component
-            for (var i = 0; i < clip.components.numItems; i++) {
-              if (clip.components[i].displayName === "Lumetri Color") {
-                lumetriComp = clip.components[i];
-                break;
+          } else if (target === "selected") {
+            for (var st = 0; st < seq.videoTracks.numTracks; st++) {
+              var selectedTrack = seq.videoTracks[st];
+              for (var sc = 0; sc < selectedTrack.clips.numItems; sc++) {
+                var selectedClip = selectedTrack.clips[sc];
+                try {
+                  if (selectedClip.isSelected()) addVideoTarget(selectedClip, st, sc);
+                } catch(e) {}
               }
             }
+          } else {
+            return __error("Unsupported batch color target: " + target);
           }
-          
-          if (!lumetriComp) return __error("Could not apply Lumetri Color effect");
-          
-          // Set the LUT path
-          for (var p = 0; p < lumetriComp.properties.numItems; p++) {
-            var prop = lumetriComp.properties[p];
-            if (prop.displayName === "Input LUT") {
-              prop.setValue("${escapeForExtendScript(args.lut_path)}", true);
-              break;
+
+          if (targets.length === 0) return __error("No video clips matched batch color target: " + target);
+
+          var values = ${extendScriptLiteral(adjustments)};
+          var details = [];
+          for (var i = 0; i < targets.length; i++) {
+            var applyResult = __mcpApplyLumetriValues(
+              targets[i],
+              values,
+              ${args.fail_on_missing === false ? "false" : "true"},
+              true
+            );
+            if (!applyResult.ok) {
+              return __error("Failed to apply Lumetri values to clip " + targets[i].clip.name + ": " + applyResult.error);
             }
+            details.push({
+              nodeId: targets[i].clip.nodeId,
+              clipName: targets[i].clip.name,
+              trackIndex: targets[i].trackIndex,
+              changes: applyResult.changes,
+              skipped: applyResult.skipped,
+              appliedLumetri: applyResult.appliedLumetri
+            });
           }
-          
-          return __result({ lutApplied: true, clipName: clip.name, lutPath: "${escapeForExtendScript(args.lut_path)}" });
+
+          return __result({
+            colorCorrected: details.length,
+            target: target,
+            changes: values,
+            clips: details,
+            liveValidationNeeded: __MCP_LUMETRI_LIVE_VALIDATION_NOTE
+          });
         `);
         return sendCommand(script, bridgeOptions);
       },
@@ -377,18 +447,18 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : null;
           if (!qeTrack) return __error("Warp Stabilizer can only be applied to video clips");
-          
+
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           // Find and apply Warp Stabilizer
           var effects = qe.project.getVideoEffectList();
           var found = false;
@@ -399,9 +469,9 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
               break;
             }
           }
-          
+
           if (!found) return __error("Warp Stabilizer effect not found");
-          
+
           // Set properties if specified
           var clip = result.clip;
           var changes = { stabilized: true };
@@ -426,7 +496,7 @@ export function getEffectsTools(bridgeOptions: BridgeOptions) {
             }
           }
           ` : ""}
-          
+
           return __result({ clipName: clip.name, info: "Warp Stabilizer applied. Analysis will begin automatically.", changes: changes });
         `);
         return sendCommand(script, bridgeOptions);

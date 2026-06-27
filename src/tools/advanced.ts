@@ -20,18 +20,18 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           if (!qeTrack) return __error("QE track not found");
-          
+
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.rippleDelete();
           return __result({ rippleDeleted: true, clipName: result.clip.name });
         `);
@@ -60,16 +60,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           var offsetTicks = __secondsToTicks(${args.offset_seconds}).toString();
           qeClip.roll(offsetTicks);
           return __result({ rolled: true, clipName: result.clip.name, offsetSeconds: ${args.offset_seconds} });
@@ -99,16 +99,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           var offsetTicks = __secondsToTicks(${args.offset_seconds}).toString();
           qeClip.slide(offsetTicks);
           return __result({ slid: true, clipName: result.clip.name, offsetSeconds: ${args.offset_seconds} });
@@ -138,16 +138,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           var offsetTicks = __secondsToTicks(${args.offset_seconds}).toString();
           qeClip.slip(offsetTicks);
           return __result({ slipped: true, clipName: result.clip.name, offsetSeconds: ${args.offset_seconds} });
@@ -177,16 +177,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.moveToTrack(${args.target_track_index});
           return __result({ moved: true, clipName: result.clip.name, newTrackIndex: ${args.target_track_index} });
         `);
@@ -211,16 +211,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.removeEffects();
           return __result({ removed: true, clipName: result.clip.name });
         `);
@@ -253,19 +253,19 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.setSpeed(${args.speed_percent});
           ${args.reverse ? `qeClip.setReverse(true);` : ""}
-          
+
           return __result({
             speedSet: true,
             clipName: result.clip.name,
@@ -299,16 +299,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.setReverse(${rev});
           return __result({ reversed: ${rev}, clipName: result.clip.name });
         `);
@@ -337,16 +337,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.setFrameBlend(${args.enabled});
           return __result({ frameBlend: ${args.enabled}, clipName: result.clip.name });
         `);
@@ -375,16 +375,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           qeClip.setTimeInterpolationType(${args.interpolation_type});
           var typeNames = ["Frame Sampling", "Frame Blending", "Optical Flow"];
           return __result({
@@ -418,16 +418,16 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var qeTrack = result.trackType === "video"
             ? qeSeq.getVideoTrackAt(result.trackIndex)
             : qeSeq.getAudioTrackAt(result.trackIndex);
           var qeClip = qeTrack.getItemAt(result.clipIndex);
           if (!qeClip) return __error("QE clip not found");
-          
+
           var oldName = result.clip.name;
           qeClip.setName("${escapeForExtendScript(args.new_name)}");
           return __result({ renamed: true, oldName: oldName, newName: "${escapeForExtendScript(args.new_name)}" });
@@ -452,13 +452,13 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
-          
+
           var clip = result.clip;
           var speed = 1;
           var reversed = false;
           try { speed = clip.getSpeed(); } catch(e) {}
           try { reversed = clip.isSpeedReversed() == 1; } catch(e) {}
-          
+
           return __result({
             clipName: clip.name,
             speed: speed,
@@ -489,7 +489,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           result.clip.setSelected(${args.selected ? 1 : 0}, true);
           return __result({ selected: ${args.selected}, clipName: result.clip.name });
         `);
@@ -557,13 +557,13 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
-          
+
           var item = __findProjectItem("${escapeForExtendScript(args.item_id)}");
           if (!item) return __error("Project item not found: ${escapeForExtendScript(args.item_id)}");
-          
+
           var startTicks = __secondsToTicks(${startSeconds}).toString();
           seq.overwriteClip(item, startTicks, ${trackIndex}, ${audioTrackIndex});
-          
+
           return __result({
             overwritten: true,
             item: item.name,
@@ -599,7 +599,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var items = [];
           ${itemLookups}
-          
+
           var seq = app.project.createNewSequenceFromClips("${escapeForExtendScript(args.name)}", items);
           if (!seq) return __error("Failed to create sequence from clips");
           return __result({ created: true, name: seq.name, id: seq.sequenceID, clipCount: items.length });
@@ -775,7 +775,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
           app.enableQE();
           var qeSeq = qe.project.getActiveSequence();
           if (!qeSeq) return __error("No active sequence (QE)");
-          
+
           qeSeq.addTracks(${v}, ${a}, ${aMono}, ${a51});
           return __result({
             added: true,
@@ -837,30 +837,25 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var clip = result.clip;
-          var components = clip.components;
-          var targetComp = null;
-          for (var i = 0; i < components.numItems; i++) {
-            if (components[i].displayName === "${escapeForExtendScript(args.component_name)}") {
-              targetComp = components[i];
-              break;
-            }
+          var componentName = "${escapeForExtendScript(args.component_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var targetComp = __findComponent(clip, componentName, componentName);
+          if (!targetComp) return __error("Component not found: " + componentName);
+
+          var targetProp = __findPropertyDeep(targetComp, propertyName, propertyName, 8);
+          if (!targetProp) return __error("Property not found: " + propertyName);
+
+          try {
+            targetProp.setColorValue(${args.alpha}, ${args.red}, ${args.green}, ${args.blue}, true);
+          } catch(e) {
+            return __error("Property does not support color values or setColorValue failed: " + e.toString());
           }
-          if (!targetComp) return __error("Component not found");
-          
-          var targetProp = null;
-          for (var j = 0; j < targetComp.properties.numItems; j++) {
-            if (targetComp.properties[j].displayName === "${escapeForExtendScript(args.property_name)}") {
-              targetProp = targetComp.properties[j];
-              break;
-            }
-          }
-          if (!targetProp) return __error("Property not found");
-          
-          targetProp.setColorValue(${args.alpha}, ${args.red}, ${args.green}, ${args.blue}, true);
           return __result({
             set: true,
+            component: componentName,
+            property: propertyName,
             color: { alpha: ${args.alpha}, red: ${args.red}, green: ${args.green}, blue: ${args.blue} }
           });
         `);
@@ -884,11 +879,11 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var clip = result.clip;
           var isAdj = false;
           try { isAdj = clip.isAdjustmentLayer(); } catch(e) {}
-          
+
           return __result({ clipName: clip.name, isAdjustmentLayer: isAdj });
         `);
         return sendCommand(script, bridgeOptions);
@@ -911,7 +906,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var linked = result.clip.getLinkedItems();
           var items = [];
           if (linked) {
@@ -923,7 +918,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
               });
             }
           }
-          
+
           return __result({ clipName: result.clip.name, linkedItems: items, count: items.length });
         `);
         return sendCommand(script, bridgeOptions);
@@ -946,10 +941,10 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found");
-          
+
           var mgtComp = result.clip.getMGTComponent();
           if (!mgtComp) return __error("Not a MOGRT clip or no MGT component found");
-          
+
           var params = [];
           for (var i = 0; i < mgtComp.properties.numItems; i++) {
             var p = mgtComp.properties[i];
@@ -958,7 +953,7 @@ export function getAdvancedTools(bridgeOptions: BridgeOptions) {
               value: p.getValue()
             });
           }
-          
+
           return __result({ clipName: result.clip.name, parameters: params });
         `);
         return sendCommand(script, bridgeOptions);

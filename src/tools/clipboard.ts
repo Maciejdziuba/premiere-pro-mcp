@@ -1,5 +1,6 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
+import { buildLumetriExtendScriptHelpers, extendScriptLiteral } from "./lumetri-helpers.js";
 
 export function getClipboardTools(bridgeOptions: BridgeOptions) {
   return {
@@ -40,8 +41,8 @@ export function getClipboardTools(bridgeOptions: BridgeOptions) {
           // Use QE to copy effects by name
           var qeSeq = qe.project.getActiveSequence();
           var tgtTrackType = tgtResult.trackType;
-          var tgtTrack = tgtTrackType === "video" 
-            ? qeSeq.getVideoTrackAt(tgtResult.trackIndex) 
+          var tgtTrack = tgtTrackType === "video"
+            ? qeSeq.getVideoTrackAt(tgtResult.trackIndex)
             : qeSeq.getAudioTrackAt(tgtResult.trackIndex);
           var qeTgtClip = tgtTrack.getItemAt(tgtResult.clipIndex);
 
@@ -141,6 +142,139 @@ export function getClipboardTools(bridgeOptions: BridgeOptions) {
           }
 
           return __result({ copiedProperties: copied, effect: "${escapeForExtendScript(args.effect_name)}" });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    copy_lumetri_grade: {
+      description: "Copy a serializable Lumetri Color grade from a source clip using locale-resilient property lookup where Premiere exposes the properties.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          source_node_id: {
+            type: "string",
+            description: "Node ID of the source clip to copy Lumetri Color values from",
+          },
+          property_keys: {
+            type: "array",
+            description: "Optional Lumetri property keys to copy. Defaults to all supported keys: input_lut, creative_lut, exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, saturation, vibrance, sharpen, vignette_amount, vignette_midpoint, vignette_roundness, vignette_feather.",
+          },
+          fail_on_missing: {
+            type: "boolean",
+            description: "Return an error if a requested property key is not exposed by Premiere (default: true). Missing optional properties are reported but skipped when property_keys is omitted.",
+          },
+        },
+        required: ["source_node_id"],
+      },
+      handler: async (args: { source_node_id: string; property_keys?: string[]; fail_on_missing?: boolean }) => {
+        const propertyKeys = Array.isArray(args.property_keys) ? args.property_keys : [];
+        const script = buildToolScript(`
+          ${buildLumetriExtendScriptHelpers()}
+
+          var result = __findClip("${escapeForExtendScript(args.source_node_id)}");
+          if (!result) return __error("Source clip not found");
+
+          var propertyKeys = ${extendScriptLiteral(propertyKeys)};
+          var unknownKeys = __mcpValidateLumetriKeys(propertyKeys);
+          if (unknownKeys.length > 0) return __error("Unsupported Lumetri grade property keys: " + unknownKeys.join(", "));
+
+          var readResult = __mcpReadLumetriGrade(
+            result,
+            propertyKeys,
+            ${args.fail_on_missing === false ? "false" : "true"}
+          );
+          if (!readResult.ok) return __error(readResult.error);
+
+          return __result({
+            copied: true,
+            source: result.clip.name,
+            grade: readResult.grade,
+            unsupported: readResult.unsupported,
+            liveValidationNeeded: readResult.liveValidationNeeded
+          });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    paste_lumetri_grade: {
+      description: "Paste a Lumetri Color grade object returned by copy_lumetri_grade to one or more video clips.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          target_node_ids: {
+            type: "array",
+            description: "One or more target video clip node IDs",
+          },
+          grade: {
+            type: "object",
+            description: "Lumetri grade object returned by copy_lumetri_grade, or an object keyed by Lumetri property names",
+          },
+          apply_if_missing: {
+            type: "boolean",
+            description: "Apply Lumetri Color to target clips that do not already have it (default: true)",
+          },
+          fail_on_missing: {
+            type: "boolean",
+            description: "Return an error when a grade property is unavailable on a target clip (default: true). Set false to skip unsupported optional controls.",
+          },
+        },
+        required: ["target_node_ids", "grade"],
+      },
+      handler: async (args: {
+        target_node_ids: string[];
+        grade: Record<string, unknown>;
+        apply_if_missing?: boolean;
+        fail_on_missing?: boolean;
+      }) => {
+        const targetNodeIds = Array.isArray(args.target_node_ids) ? args.target_node_ids : [];
+        const script = buildToolScript(`
+          ${buildLumetriExtendScriptHelpers()}
+
+          var targetNodeIds = ${extendScriptLiteral(targetNodeIds)};
+          if (!targetNodeIds || targetNodeIds.length === 0) return __error("target_node_ids must include at least one clip node ID");
+
+          var grade = ${extendScriptLiteral(args.grade)};
+          var normalized = __mcpNormalizeLumetriGrade(grade);
+          if (normalized.unknown.length > 0) {
+            return __error("Unsupported Lumetri grade property keys: " + normalized.unknown.join(", "));
+          }
+
+          var valueKeys = __mcpLumetriObjectKeys(normalized.values);
+          if (valueKeys.length === 0) return __error("Lumetri grade has no supported properties to paste");
+
+          var details = [];
+          for (var i = 0; i < targetNodeIds.length; i++) {
+            var result = __findClip(String(targetNodeIds[i]));
+            if (!result) return __error("Target clip not found: " + targetNodeIds[i]);
+            if (result.trackType !== "video") return __error("Lumetri Color can only be pasted to video clips: " + targetNodeIds[i]);
+
+            var applyResult = __mcpApplyLumetriValues(
+              result,
+              normalized.values,
+              ${args.fail_on_missing === false ? "false" : "true"},
+              ${args.apply_if_missing === false ? "false" : "true"}
+            );
+            if (!applyResult.ok) {
+              return __error("Failed to paste Lumetri grade to clip " + result.clip.name + ": " + applyResult.error);
+            }
+
+            details.push({
+              nodeId: result.clip.nodeId,
+              clipName: result.clip.name,
+              changes: applyResult.changes,
+              skipped: applyResult.skipped,
+              appliedLumetri: applyResult.appliedLumetri
+            });
+          }
+
+          return __result({
+            pasted: details.length,
+            propertyKeys: valueKeys,
+            targets: details,
+            liveValidationNeeded: __MCP_LUMETRI_LIVE_VALIDATION_NOTE
+          });
         `);
         return sendCommand(script, bridgeOptions);
       },
