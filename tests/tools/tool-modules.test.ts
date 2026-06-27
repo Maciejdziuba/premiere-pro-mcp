@@ -316,6 +316,110 @@ describe("Tool Handler Behavior", () => {
     });
   });
 
+  describe("timeline safety controls", () => {
+    it("add_to_timeline can generate a dry-run empty-range preflight", async () => {
+      const tools = getTimelineTools(bridgeOptions);
+      await (tools.add_to_timeline.handler as any)({
+        item_id: "clip-1",
+        track_index: 1,
+        audio_track_index: 2,
+        start_seconds: 12.5,
+        duration_seconds: 4,
+        require_empty_range: true,
+        dry_run: true,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("__timelineCollectRangeOverlaps");
+      expect(userCode).toContain("var requireEmptyRange = true");
+      expect(userCode).toContain("var dryRun = true");
+      expect(userCode).toContain("if (!dryRun)");
+      expect(userCode).toContain("safeToPlace");
+      expect(userCode).toContain("seq.insertClip(item");
+    });
+
+    it("move_clip reports original position and destination overlaps for dry runs", async () => {
+      const tools = getTimelineTools(bridgeOptions);
+      await (tools.move_clip.handler as any)({
+        node_id: "timeline-node-1",
+        new_start_seconds: 20,
+        new_track_index: 3,
+        require_empty_range: true,
+        dry_run: true,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("var originalStartTicks = clip.start.ticks");
+      expect(userCode).toContain("__timelineCollectRangeOverlaps");
+      expect(userCode).toContain("Clip track move API is unavailable");
+      expect(userCode).toContain("moved: !dryRun");
+      expect(userCode).toContain("overlaps: overlaps");
+    });
+
+    it("set_clip_properties uses locale helper lookup for motion and opacity properties", async () => {
+      const tools = getTimelineTools(bridgeOptions);
+      await (tools.set_clip_properties.handler as any)({
+        node_id: "timeline-node-1",
+        opacity: 75,
+        position_x: 100,
+        position_y: 200,
+        scale: 125,
+        rotation: 15,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("var opacityComp = __findOpacityComponent(clip)");
+      expect(userCode).toContain('__findKnownProperty(opacityComp, "opacity", "opacity")');
+      expect(userCode).toContain("var motionComp = __findMotionComponent(clip)");
+      expect(userCode).toContain('__findKnownProperty(motionComp, "motion", "position")');
+      expect(userCode).toContain("missingProperties");
+      expect(userCode).not.toContain('displayName === "Motion"');
+    });
+  });
+
+  describe("source monitor safety controls", () => {
+    it("insert_from_source can generate a dry-run range preflight", async () => {
+      const tools = getSourceMonitorTools(bridgeOptions);
+      await (tools.insert_from_source.handler as any)({
+        video_track_index: 1,
+        audio_track_index: 1,
+        duration_seconds: 3,
+        require_empty_range: true,
+        dry_run: true,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("__sourceCollectRangeOverlaps");
+      expect(userCode).toContain("var requireEmptyRange = true");
+      expect(userCode).toContain("var dryRun = true");
+      expect(userCode).toContain("if (!dryRun)");
+      expect(userCode).toContain("seq.insertClip(item");
+      expect(userCode).toContain("safeToPlace");
+    });
+
+    it("overwrite_from_source can report overlaps without overwriting", async () => {
+      const tools = getSourceMonitorTools(bridgeOptions);
+      await (tools.overwrite_from_source.handler as any)({
+        video_track_index: 2,
+        audio_track_index: 0,
+        duration_seconds: 2.5,
+        dry_run: true,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("__sourceCollectRangeOverlaps");
+      expect(userCode).toContain("var dryRun = true");
+      expect(userCode).toContain("if (!dryRun)");
+      expect(userCode).toContain("seq.overwriteClip(item");
+      expect(userCode).toContain("overwritten: !dryRun");
+    });
+  });
+
   describe("discovery tools", () => {
     it("get_project_info generates correct script", async () => {
       const tools = getDiscoveryTools(bridgeOptions);

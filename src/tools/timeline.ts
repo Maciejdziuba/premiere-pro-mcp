@@ -1,10 +1,68 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
 
+const TIMELINE_SAFETY_HELPERS = `
+function __timelineTrackIsLocked(track) {
+  try { return track.isLocked() === true || track.isLocked() === 1; } catch(e) {}
+  return false;
+}
+
+function __timelineTrackName(track) {
+  try { if (track.name) return track.name; } catch(e) {}
+  return "";
+}
+
+function __timelineCollectRangeOverlaps(track, trackType, trackIndex, startTicks, endTicks, ignoreNodeId) {
+  var overlaps = [];
+  if (!track || endTicks <= startTicks) return overlaps;
+
+  for (var c = 0; c < track.clips.numItems; c++) {
+    var clip = track.clips[c];
+    if (ignoreNodeId && clip.nodeId === ignoreNodeId) continue;
+
+    var clipStart = parseFloat(clip.start.ticks);
+    var clipEnd = parseFloat(clip.end.ticks);
+    if (clipStart < endTicks && clipEnd > startTicks) {
+      overlaps.push({
+        nodeId: clip.nodeId,
+        name: clip.name,
+        trackType: trackType,
+        trackIndex: trackIndex,
+        clipIndex: c,
+        startSeconds: __ticksToSeconds(clip.start.ticks),
+        endSeconds: __ticksToSeconds(clip.end.ticks)
+      });
+    }
+  }
+
+  return overlaps;
+}
+
+function __timelineProjectItemDurationTicks(item) {
+  var inTicks = null;
+  var outTicks = null;
+  try { inTicks = parseFloat(item.getInPoint().ticks); } catch(e) {}
+  try { outTicks = parseFloat(item.getOutPoint().ticks); } catch(e) {}
+  if (!isNaN(inTicks) && !isNaN(outTicks) && outTicks > inTicks) return outTicks - inTicks;
+
+  try {
+    var durationTicks = parseFloat(item.getDuration().ticks);
+    if (!isNaN(durationTicks) && durationTicks > 0) return durationTicks;
+  } catch(e) {}
+
+  try {
+    var itemDurationTicks = parseFloat(item.duration.ticks);
+    if (!isNaN(itemDurationTicks) && itemDurationTicks > 0) return itemDurationTicks;
+  } catch(e) {}
+
+  return 0;
+}
+`;
+
 export function getTimelineTools(bridgeOptions: BridgeOptions) {
   return {
     add_to_timeline: {
-      description: "Add a project item (clip) to the timeline at a specific position",
+      description: "Add a project item (clip) to the timeline at a specific position, with optional dry-run and empty-range safety checks",
       parameters: {
         type: "object" as const,
         properties: {
@@ -24,29 +82,98 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
             type: "number",
             description: "Audio track index for the audio portion (default: 0)",
           },
+          duration_seconds: {
+            type: "number",
+            description: "Expected timeline duration for safety checks. If omitted, the tool tries to read the project item duration.",
+          },
+          require_empty_range: {
+            type: "boolean",
+            description: "If true, fail before inserting when the target video or audio range already contains clips. Default: false",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "If true, return target track/range safety details without inserting the clip. Default: false",
+          },
         },
         required: ["item_id"],
       },
-      handler: async (args: { item_id: string; track_index?: number; start_seconds?: number; audio_track_index?: number }) => {
+      handler: async (args: {
+        item_id: string;
+        track_index?: number;
+        start_seconds?: number;
+        audio_track_index?: number;
+        duration_seconds?: number;
+        require_empty_range?: boolean;
+        dry_run?: boolean;
+      }) => {
         const trackIndex = args.track_index ?? 0;
         const startSeconds = args.start_seconds ?? 0;
         const audioTrackIndex = args.audio_track_index ?? 0;
+        const durationTicksExpr = args.duration_seconds !== undefined
+          ? `__secondsToTicks(${args.duration_seconds})`
+          : "__timelineProjectItemDurationTicks(item)";
+        const requireEmptyRange = args.require_empty_range === true;
+        const dryRun = args.dry_run === true;
 
         const script = buildToolScript(`
+          ${TIMELINE_SAFETY_HELPERS}
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
           
           var item = __findProjectItem("${escapeForExtendScript(args.item_id)}");
           if (!item) return __error("Project item not found: ${escapeForExtendScript(args.item_id)}");
+
+          if (${trackIndex} < 0 || ${trackIndex} >= seq.videoTracks.numTracks) return __error("Video track index out of range");
+          if (${audioTrackIndex} < 0 || ${audioTrackIndex} >= seq.audioTracks.numTracks) return __error("Audio track index out of range");
+
+          var videoTrack = seq.videoTracks[${trackIndex}];
+          var audioTrack = seq.audioTracks[${audioTrackIndex}];
+          if (__timelineTrackIsLocked(videoTrack)) return __error("Target video track is locked");
+          if (__timelineTrackIsLocked(audioTrack)) return __error("Target audio track is locked");
           
           var startTicks = __secondsToTicks(${startSeconds}).toString();
-          seq.insertClip(item, startTicks, ${trackIndex}, ${audioTrackIndex});
+          var durationTicks = ${durationTicksExpr};
+          var rangeChecked = durationTicks > 0;
+          var endTicks = parseFloat(startTicks) + durationTicks;
+          var videoOverlaps = [];
+          var audioOverlaps = [];
+          var warnings = [];
+          if (rangeChecked) {
+            videoOverlaps = __timelineCollectRangeOverlaps(videoTrack, "video", ${trackIndex}, parseFloat(startTicks), endTicks, null);
+            audioOverlaps = __timelineCollectRangeOverlaps(audioTrack, "audio", ${audioTrackIndex}, parseFloat(startTicks), endTicks, null);
+          } else {
+            warnings.push("Could not determine source duration; provide duration_seconds for overlap preflight.");
+          }
+
+          var totalOverlaps = videoOverlaps.length + audioOverlaps.length;
+          var requireEmptyRange = ${requireEmptyRange ? "true" : "false"};
+          var dryRun = ${dryRun ? "true" : "false"};
+          if (requireEmptyRange && !rangeChecked) return __error("duration_seconds is required when require_empty_range is true and source duration cannot be read");
+          if (requireEmptyRange && totalOverlaps > 0) return __error("Target range is not empty; found " + totalOverlaps + " overlapping clip(s)");
+
+          if (!dryRun) {
+            seq.insertClip(item, startTicks, ${trackIndex}, ${audioTrackIndex});
+          }
           
           return __result({
-            added: true,
+            added: !dryRun,
+            dryRun: dryRun,
             item: item.name,
             trackIndex: ${trackIndex},
-            startSeconds: ${startSeconds}
+            audioTrackIndex: ${audioTrackIndex},
+            startSeconds: ${startSeconds},
+            durationSeconds: rangeChecked ? __ticksToSeconds(durationTicks) : null,
+            rangeChecked: rangeChecked,
+            safeToPlace: totalOverlaps === 0,
+            overlaps: {
+              video: videoOverlaps,
+              audio: audioOverlaps
+            },
+            targetTracks: {
+              video: { index: ${trackIndex}, name: __timelineTrackName(videoTrack), locked: false },
+              audio: { index: ${audioTrackIndex}, name: __timelineTrackName(audioTrack), locked: false }
+            },
+            warnings: warnings
           });
         `);
         return sendCommand(script, bridgeOptions);
@@ -99,31 +226,71 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
             type: "number",
             description: "Optional new track index to move the clip to",
           },
+          require_empty_range: {
+            type: "boolean",
+            description: "If true, fail before moving when the destination range already contains another clip. Default: false",
+          },
+          dry_run: {
+            type: "boolean",
+            description: "If true, return destination safety details without moving the clip. Default: false",
+          },
         },
         required: ["node_id", "new_start_seconds"],
       },
-      handler: async (args: { node_id: string; new_start_seconds: number; new_track_index?: number }) => {
+      handler: async (args: { node_id: string; new_start_seconds: number; new_track_index?: number; require_empty_range?: boolean; dry_run?: boolean }) => {
+        const targetTrackExpr = args.new_track_index !== undefined ? `${args.new_track_index}` : "result.trackIndex";
+        const requireEmptyRange = args.require_empty_range === true;
+        const dryRun = args.dry_run === true;
         const script = buildToolScript(`
+          ${TIMELINE_SAFETY_HELPERS}
           var result = __findClip("${escapeForExtendScript(args.node_id)}");
           if (!result) return __error("Clip not found: ${escapeForExtendScript(args.node_id)}");
           
           var clip = result.clip;
-          var newStartTicks = __secondsToTicks(${args.new_start_seconds}).toString();
-          clip.start = newStartTicks;
-          
-          ${args.new_track_index !== undefined ? `
-          // Move to different track if specified
           var seq = app.project.activeSequence;
+          if (!seq) return __error("No active sequence");
+
+          var originalStartTicks = clip.start.ticks;
+          var targetTrackIndex = ${targetTrackExpr};
           var targetTracks = result.trackType === "video" ? seq.videoTracks : seq.audioTracks;
-          if (${args.new_track_index} < targetTracks.numTracks) {
-            clip.moveToTrack(targetTracks[${args.new_track_index}]);
+          if (targetTrackIndex < 0 || targetTrackIndex >= targetTracks.numTracks) return __error("Target track index out of range");
+          var targetTrack = targetTracks[targetTrackIndex];
+          if (__timelineTrackIsLocked(targetTrack)) return __error("Target track is locked");
+          if (targetTrackIndex !== result.trackIndex && !clip.moveToTrack) return __error("Clip track move API is unavailable in this Premiere version");
+
+          var newStartTicks = __secondsToTicks(${args.new_start_seconds}).toString();
+          var durationTicks = parseFloat(clip.duration.ticks);
+          if (isNaN(durationTicks) || durationTicks <= 0) return __error("Could not determine clip duration for move preflight");
+          var newEndTicks = parseFloat(newStartTicks) + durationTicks;
+          var overlaps = __timelineCollectRangeOverlaps(targetTrack, result.trackType, targetTrackIndex, parseFloat(newStartTicks), newEndTicks, clip.nodeId);
+          var requireEmptyRange = ${requireEmptyRange ? "true" : "false"};
+          var dryRun = ${dryRun ? "true" : "false"};
+          if (requireEmptyRange && overlaps.length > 0) return __error("Destination range is not empty; found " + overlaps.length + " overlapping clip(s)");
+
+          if (!dryRun) {
+            clip.start = newStartTicks;
+            if (targetTrackIndex !== result.trackIndex && clip.moveToTrack) {
+              clip.moveToTrack(targetTrack);
+            }
           }
-          ` : ""}
           
           return __result({
-            moved: true,
+            moved: !dryRun,
+            dryRun: dryRun,
             clipName: clip.name,
-            newStart: ${args.new_start_seconds}
+            from: {
+              trackType: result.trackType,
+              trackIndex: result.trackIndex,
+              startSeconds: __ticksToSeconds(originalStartTicks)
+            },
+            proposed: {
+              trackType: result.trackType,
+              trackIndex: targetTrackIndex,
+              startSeconds: ${args.new_start_seconds},
+              endSeconds: __ticksToSeconds(newEndTicks)
+            },
+            safeToMove: overlaps.length === 0,
+            overlaps: overlaps
           });
         `);
         return sendCommand(script, bridgeOptions);
@@ -325,19 +492,16 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
           
           var clip = result.clip;
           var changes = {};
+          var missingProperties = [];
           
           ${args.opacity !== undefined ? `
-          // Set opacity via Motion component
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.matchName === "AE.ADBE Opacity" || comp.displayName === "Opacity") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                if (comp.properties[p].displayName === "Opacity") {
-                  comp.properties[p].setValue(${args.opacity}, true);
-                  changes.opacity = ${args.opacity};
-                }
-              }
-            }
+          var opacityComp = __findOpacityComponent(clip);
+          var opacityProp = __findKnownProperty(opacityComp, "opacity", "opacity");
+          if (opacityProp) {
+            opacityProp.setValue(${args.opacity}, true);
+            changes.opacity = ${args.opacity};
+          } else {
+            missingProperties.push("opacity");
           }
           ` : ""}
           
@@ -347,36 +511,42 @@ export function getTimelineTools(bridgeOptions: BridgeOptions) {
           ` : ""}
           
           ${args.scale !== undefined || args.position_x !== undefined || args.position_y !== undefined || args.rotation !== undefined ? `
-          for (var i = 0; i < clip.components.numItems; i++) {
-            var comp = clip.components[i];
-            if (comp.matchName === "AE.ADBE Motion" || comp.displayName === "Motion") {
-              for (var p = 0; p < comp.properties.numItems; p++) {
-                var prop = comp.properties[p];
-                ${args.scale !== undefined ? `
-                if (prop.displayName === "Scale") {
-                  prop.setValue(${args.scale}, true);
-                  changes.scale = ${args.scale};
-                }` : ""}
-                ${args.position_x !== undefined || args.position_y !== undefined ? `
-                if (prop.displayName === "Position") {
-                  var posVal = prop.getValue();
-                  var px = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[0] : 0;
-                  var py = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[1] : 0;
-                  ${args.position_x !== undefined ? `px = ${args.position_x}; changes.position_x = ${args.position_x};` : ""}
-                  ${args.position_y !== undefined ? `py = ${args.position_y}; changes.position_y = ${args.position_y};` : ""}
-                  prop.setValue([px, py], true);
-                }` : ""}
-                ${args.rotation !== undefined ? `
-                if (prop.displayName === "Rotation") {
-                  prop.setValue(${args.rotation}, true);
-                  changes.rotation = ${args.rotation};
-                }` : ""}
-              }
-            }
+          var motionComp = __findMotionComponent(clip);
+          if (!motionComp) {
+            missingProperties.push("motion");
+          } else {
+            ${args.scale !== undefined ? `
+            var scaleProp = __findKnownProperty(motionComp, "motion", "scale");
+            if (scaleProp) {
+              scaleProp.setValue(${args.scale}, true);
+              changes.scale = ${args.scale};
+            } else {
+              missingProperties.push("scale");
+            }` : ""}
+            ${args.position_x !== undefined || args.position_y !== undefined ? `
+            var positionProp = __findKnownProperty(motionComp, "motion", "position");
+            if (positionProp) {
+              var posVal = positionProp.getValue();
+              var px = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[0] : 0;
+              var py = posVal && typeof posVal === "object" && posVal.length >= 2 ? posVal[1] : 0;
+              ${args.position_x !== undefined ? `px = ${args.position_x}; changes.position_x = ${args.position_x};` : ""}
+              ${args.position_y !== undefined ? `py = ${args.position_y}; changes.position_y = ${args.position_y};` : ""}
+              positionProp.setValue([px, py], true);
+            } else {
+              missingProperties.push("position");
+            }` : ""}
+            ${args.rotation !== undefined ? `
+            var rotationProp = __findKnownProperty(motionComp, "motion", "rotation");
+            if (rotationProp) {
+              rotationProp.setValue(${args.rotation}, true);
+              changes.rotation = ${args.rotation};
+            } else {
+              missingProperties.push("rotation");
+            }` : ""}
           }
           ` : ""}
           
-          return __result({ updated: true, clipName: clip.name, changes: changes });
+          return __result({ updated: true, clipName: clip.name, changes: changes, missingProperties: missingProperties });
         `);
         return sendCommand(script, bridgeOptions);
       },
