@@ -25,6 +25,8 @@ npm test
 
 This tells an MCP client (such as Claude Code) how to launch the built server. A repo-local copy lives at [`.mcp.local.example.json`](.mcp.local.example.json).
 
+Important: the temp dir must exactly match the directory shown in the MCP Bridge panel. On this Mac right now, Premiere's CEP panel is polling `/var/folders/5k/c8kmwpjx6q36r3bmh0tw2nyw0000gn/T/premiere-mcp-bridge`.
+
 ```json
 {
   "mcpServers": {
@@ -34,7 +36,7 @@ This tells an MCP client (such as Claude Code) how to launch the built server. A
         "/Users/maciejdziuba/Documents/Software /Premier Pro MCP Fork/dist/index.js"
       ],
       "env": {
-        "PREMIERE_TEMP_DIR": "/tmp/premiere-mcp-bridge"
+        "PREMIERE_TEMP_DIR": "/var/folders/5k/c8kmwpjx6q36r3bmh0tw2nyw0000gn/T/premiere-mcp-bridge"
       }
     }
   }
@@ -44,7 +46,7 @@ This tells an MCP client (such as Claude Code) how to launch the built server. A
 Equivalent Claude Code command:
 
 ```bash
-claude mcp add premiere-pro-local --env PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge -- node "/Users/maciejdziuba/Documents/Software /Premier Pro MCP Fork/dist/index.js"
+claude mcp add premiere-pro-local --env PREMIERE_TEMP_DIR=/var/folders/5k/c8kmwpjx6q36r3bmh0tw2nyw0000gn/T/premiere-mcp-bridge -- node "/Users/maciejdziuba/Documents/Software /Premier Pro MCP Fork/dist/index.js"
 ```
 
 Do not run the command unless you want to modify Claude Code's MCP config.

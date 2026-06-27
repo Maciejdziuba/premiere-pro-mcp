@@ -6,7 +6,7 @@
         "/Users/maciejdziuba/Documents/Software /Premier Pro MCP Fork/dist/index.js"
       ],
       "env": {
-        "PREMIERE_TEMP_DIR": "/tmp/premiere-mcp-bridge"
+        "PREMIERE_TEMP_DIR": "/var/folders/5k/c8kmwpjx6q36r3bmh0tw2nyw0000gn/T/premiere-mcp-bridge"
       }
     }
   }
