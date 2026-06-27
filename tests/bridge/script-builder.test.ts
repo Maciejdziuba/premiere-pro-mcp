@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { buildScript, escapeForExtendScript, buildToolScript } from "../../src/bridge/script-builder.js";
 
+function helperPrelude() {
+  const result = buildScript("");
+  return result.slice(0, result.indexOf("(function() {"));
+}
+
 describe("buildScript", () => {
   it("wraps code in an IIFE with try/catch", () => {
     const result = buildScript("return __result({ ok: true });");
@@ -21,6 +26,13 @@ describe("buildScript", () => {
     expect(result).toContain("function __findSequence(idOrName)");
     expect(result).toContain("function __findProjectItem(nodeIdOrName, rootItem)");
     expect(result).toContain("function __findClip(nodeId)");
+    expect(result).toContain("function __findByMatchNameThenName(collection, matchNames, localizedNames)");
+    expect(result).toContain("function __findComponent(clip, matchNames, localizedNames)");
+    expect(result).toContain("function __findProperty(container, matchNames, localizedNames)");
+    expect(result).toContain("function __findNestedProperty(container, path)");
+    expect(result).toContain("function __findPropertyDeep(container, matchNames, localizedNames, maxDepth)");
+    expect(result).toContain("function __findEffect(effectList, matchNames, localizedNames)");
+    expect(result).toContain("function __findTransition(transitionList, matchNames, localizedNames)");
     expect(result).toContain("function __getAllClips(seq)");
     expect(result).toContain("function __jsonStringify(obj)");
     expect(result).toContain("function __result(data)");
@@ -45,6 +57,110 @@ describe("buildScript", () => {
 
   it("returns a string", () => {
     expect(typeof buildScript("")).toBe("string");
+  });
+});
+
+describe("locale-resilient lookup helpers", () => {
+  it("prepends shared lookup helpers for components, properties, effects, and transitions", () => {
+    const result = buildScript("");
+    expect(result).toContain("function __asLookupArray(value)");
+    expect(result).toContain("function __lookupSpecFromStep(step)");
+    expect(result).toContain("function __getCollectionLength(collection)");
+    expect(result).toContain("function __getCollectionItem(collection, index)");
+    expect(result).toContain("function __findByMatchNameThenName(collection, matchNames, localizedNames)");
+    expect(result).toContain("function __findComponent(clip, matchNames, localizedNames)");
+    expect(result).toContain("function __findProperty(container, matchNames, localizedNames)");
+    expect(result).toContain("function __findPropertyGroup(container, matchNames, localizedNames)");
+    expect(result).toContain("function __findNestedProperty(container, path)");
+    expect(result).toContain("function __findPropertyDeep(container, matchNames, localizedNames, maxDepth)");
+    expect(result).toContain("function __findEffect(effectList, matchNames, localizedNames)");
+    expect(result).toContain("function __findVideoEffect(matchNames, localizedNames)");
+    expect(result).toContain("function __findAudioEffect(matchNames, localizedNames)");
+    expect(result).toContain("function __findTransition(transitionList, matchNames, localizedNames)");
+    expect(result).toContain("function __findVideoTransition(matchNames, localizedNames)");
+    expect(result).toContain("function __findAudioTransition(matchNames, localizedNames)");
+  });
+
+  it("searches stable matchName values before localized displayName/name values", () => {
+    const result = helperPrelude();
+    const matchNamePass = result.indexOf("// First pass: stable matchName values survive UI localization.");
+    const localizedPass = result.indexOf("// Second pass: displayName/name values are localized UI labels.");
+    expect(matchNamePass).toBeGreaterThan(-1);
+    expect(localizedPass).toBeGreaterThan(-1);
+    expect(matchNamePass).toBeLessThan(localizedPass);
+    expect(result).toContain('__getStringField(matchItem, "matchName")');
+    expect(result).toContain('__getStringField(item, "displayName")');
+    expect(result).toContain('__getStringField(item, "name")');
+  });
+
+  it("normalizes nested lookup path steps from matchName and localized name fields", () => {
+    const result = buildScript("");
+    expect(result).toContain("__appendLookupValues(matchNames, step.matchName);");
+    expect(result).toContain("__appendLookupValues(matchNames, step.matchNames);");
+    expect(result).toContain("__appendLookupValues(localizedNames, step.localizedName);");
+    expect(result).toContain("__appendLookupValues(localizedNames, step.localizedNames);");
+    expect(result).toContain("__appendLookupValues(localizedNames, step.displayName);");
+    expect(result).toContain("__appendLookupValues(localizedNames, step.displayNames);");
+    expect(result).toContain("__appendLookupValues(localizedNames, step.name);");
+    expect(result).toContain("__appendLookupValues(localizedNames, step.names);");
+  });
+
+  it("walks nested property groups through properties collections with a depth limit", () => {
+    const result = buildScript("");
+    expect(result).toContain("current = __findProperty(current, spec.matchNames, spec.localizedNames);");
+    expect(result).toContain("if (maxDepth === undefined || maxDepth === null) maxDepth = 8;");
+    expect(result).toContain("var props = __getPropertiesCollection(container);");
+    expect(result).toContain("var nested = __findPropertyDeep(child, matchNames, localizedNames, maxDepth - 1);");
+  });
+
+  it("covers common intrinsic Premiere components and property aliases", () => {
+    const result = buildScript("");
+    expect(result).toContain("var __MCP_COMPONENT_ALIASES = {");
+    expect(result).toContain('matchNames: ["AE.ADBE Motion"]');
+    expect(result).toContain('matchNames: ["AE.ADBE Opacity"]');
+    expect(result).toContain('matchNames: ["audioVolume"]');
+    expect(result).toContain('matchNames: ["AE.ADBE Lumetri", "ADBE Lumetri"]');
+    expect(result).toContain('matchNames: ["AE.ADBE Time Remapping", "timeRemapping"]');
+    expect(result).toContain('localizedNames: ["Motion"]');
+    expect(result).toContain('localizedNames: ["Opacity"]');
+    expect(result).toContain('localizedNames: ["Volume"]');
+    expect(result).toContain('localizedNames: ["Lumetri Color"]');
+    expect(result).toContain('localizedNames: ["Time Remapping"]');
+    expect(result).toContain("function __findMotionComponent(clip)");
+    expect(result).toContain("function __findOpacityComponent(clip)");
+    expect(result).toContain("function __findVolumeComponent(clip)");
+    expect(result).toContain("function __findLumetriComponent(clip)");
+    expect(result).toContain("function __findTimeRemappingComponent(clip)");
+  });
+
+  it("provides known property helpers for intrinsic component controls", () => {
+    const result = buildScript("");
+    expect(result).toContain("var __MCP_PROPERTY_ALIASES = {");
+    expect(result).toContain('position: { matchNames: ["ADBE Position", "AE.ADBE Position"], localizedNames: ["Position"] }');
+    expect(result).toContain('opacity: { matchNames: ["ADBE Opacity", "AE.ADBE Opacity"], localizedNames: ["Opacity"] }');
+    expect(result).toContain('level: { matchNames: ["audioVolume", "ADBE Audio Volume"], localizedNames: ["Level"] }');
+    expect(result).toContain('inputLut: { matchNames: ["ADBE Lumetri Input LUT"], localizedNames: ["Input LUT"] }');
+    expect(result).toContain('speed: { matchNames: ["ADBE Time Remapping Speed", "timeRemappingSpeed"], localizedNames: ["Speed"] }');
+    expect(result).toContain("function __findKnownProperty(component, componentKey, propertyKey)");
+    expect(result).toContain("return __findPropertyDeep(component, aliases.matchNames, aliases.localizedNames, 8);");
+  });
+
+  it("uses QE list scans plus localized getByName fallbacks for effects and transitions", () => {
+    const result = buildScript("");
+    expect(result).toContain("qe.project.getVideoEffectList()");
+    expect(result).toContain("qe.project.getAudioEffectList()");
+    expect(result).toContain('"getVideoEffectByName"');
+    expect(result).toContain('"getAudioEffectByName"');
+    expect(result).toContain("qe.project.getVideoTransitionList()");
+    expect(result).toContain("qe.project.getAudioTransitionList()");
+    expect(result).toContain('"getVideoTransitionByName"');
+    expect(result).toContain('"getAudioTransitionByName"');
+    expect(result).toContain("function __findQeProjectItemByLocalizedName(methodName, localizedNames)");
+  });
+
+  it("keeps the helper prelude ES3-compatible", () => {
+    const result = helperPrelude();
+    expect(result).not.toMatch(/\b(let|const)\b|=>/);
   });
 });
 
