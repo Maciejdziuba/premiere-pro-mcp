@@ -28,7 +28,7 @@ npm run validate:tools
 npm run diagnostics:sweep -- --dry-run
 ```
 
-`npm run validate:tools` imports the built `dist/tools/*.js` catalog, so run `npm run build` first. It validates the 269-tool catalog for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema property metadata.
+`npm run validate:tools` imports the built `dist/tools/*.js` catalog, so run `npm run build` first. It validates the 278-tool catalog for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema property metadata.
 
 `npm run diagnostics:sweep -- --dry-run` verifies the runtime sweep command path without importing `dist/` or contacting Premiere.
 

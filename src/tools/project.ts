@@ -327,6 +327,8 @@ export function getProjectTools(bridgeOptions: BridgeOptions) {
       parameters: {},
       handler: async () => {
         const script = buildToolScript(`
+          if (!app.encoder) return __error("Adobe Media Encoder not available");
+          if (typeof app.encoder.startBatch !== "function") return __error("encoder.startBatch is not available");
           app.encoder.startBatch();
           return __result({ started: true });
         `);

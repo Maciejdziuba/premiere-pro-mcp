@@ -6,7 +6,7 @@
 
 **Give AI full control over Adobe Premiere Pro.**
 
-269 tools across 28 modules — the most comprehensive MCP server for video editing.
+278 tools across 28 modules — the most comprehensive MCP server for video editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
@@ -27,7 +27,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 "Add the B-roll clips to V2, apply a cross dissolve between each, color correct them to match the A-roll, and export a 1080p ProRes."
 ```
 
-The AI handles the entire workflow through 269 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
+The AI handles the entire workflow through 278 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
 
 ---
 
@@ -201,7 +201,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 ---
 
-## Tools (269)
+## Tools (278)
 
 ### Discovery & Inspection (10 + 10)
 
@@ -264,13 +264,15 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 | `get_value_at_time` | Query interpolated value at any time |
 | `set_color_value` | Set color properties on effects |
 
-### Export & Encoding (14)
+### Export & Encoding (16)
 
 | Tool | Description |
 |------|-------------|
 | `export_sequence` | Export via Adobe Media Encoder |
+| `get_export_capabilities` / `diagnose_export_preset` | AME/export diagnostics |
 | `capture_frame` | Export frame as PNG, return as base64 image |
 | `export_as_fcp_xml` / `export_aaf` / `export_omf` | Interchange formats |
+| `batch_export_sequences` / `batch_export_interchange` | Batch AME queueing and interchange exports |
 | `encode_project_item` / `encode_file` | Direct encoding |
 | `start_batch_encode` | Start render queue |
 
@@ -312,11 +314,14 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 | `attach_custom_property` | FCP XML custom properties |
 | `unnest_sequence` | Replace nested sequence with its clips |
 
-### Workspace & Captions (2 + 1)
+### Workspace & Captions (2 + 5)
 
 | Tool | Description |
 |------|-------------|
 | `get_workspaces` / `set_workspace` | Switch workspace layouts |
+| `parse_srt_file` / `write_srt_file` | Local SRT helper utilities |
+| `import_caption_file` | Import caption sidecar files |
+| `get_caption_api_capabilities` | Report caption API availability |
 | `create_caption_track` | Create caption/subtitle tracks |
 
 ### Scripting (6)
@@ -413,7 +418,7 @@ premiere-pro-mcp/
 ├── src/
 │   ├── index.ts                 # Entry point — stdio transport setup
 │   ├── http-server.ts           # Entry point — HTTP/SSE transport (Fly.io / remote)
-│   ├── server.ts                # MCP server — registers all 269 tools + 2 resources
+│   ├── server.ts                # MCP server — registers all 278 tools + 2 resources
 │   ├── bridge/
 │   │   ├── file-bridge.ts       # File-based IPC (write .jsx, poll .json)
 │   │   └── script-builder.ts    # ExtendScript generator with ES3 helpers

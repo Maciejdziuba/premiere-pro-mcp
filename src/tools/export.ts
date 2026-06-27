@@ -4,8 +4,127 @@ import { readFileSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
+function toExtendScriptJsonLiteral(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function workAreaTypeCode(workAreaType?: string): string {
+  switch (workAreaType) {
+    case "in_to_out":
+      return "1";
+    case "work_area":
+      return "2";
+    default:
+      return "0";
+  }
+}
+
 export function getExportTools(bridgeOptions: BridgeOptions) {
   return {
+    get_export_capabilities: {
+      description:
+        "Report export, interchange, and AME encoder APIs exposed by the current Premiere runtime without queueing exports.",
+      parameters: {},
+      handler: async () => {
+        const script = buildToolScript(`
+          var seq = app.project.activeSequence;
+          var encoder = app.encoder;
+          var sequence = {
+            hasActiveSequence: !!seq,
+            exportAsMediaDirect: false,
+            exportAsFinalCutProXML: false,
+            getExportFileExtension: false,
+            exportAsProject: false
+          };
+          if (seq) {
+            sequence.exportAsMediaDirect = typeof seq.exportAsMediaDirect === "function";
+            sequence.exportAsFinalCutProXML = typeof seq.exportAsFinalCutProXML === "function";
+            sequence.getExportFileExtension = typeof seq.getExportFileExtension === "function";
+            sequence.exportAsProject = typeof seq.exportAsProject === "function";
+          }
+
+          return __result({
+            readOnly: true,
+            premiereVersion: app.version || null,
+            build: app.build || null,
+            activeSequenceName: seq ? seq.name : null,
+            encoder: {
+              available: !!encoder,
+              launchEncoder: !!(encoder && encoder.launchEncoder),
+              encodeSequence: !!(encoder && encoder.encodeSequence),
+              encodeProjectItem: !!(encoder && encoder.encodeProjectItem),
+              encodeFile: !!(encoder && encoder.encodeFile),
+              startBatch: !!(encoder && encoder.startBatch),
+              setEmbeddedXMPEnabled: !!(encoder && encoder.setEmbeddedXMPEnabled),
+              setSidecarXMPEnabled: !!(encoder && encoder.setSidecarXMPEnabled),
+              detailedQueueStatus: false
+            },
+            sequence: sequence,
+            project: {
+              exportAAF: typeof app.project.exportAAF === "function",
+              exportOMF: typeof app.project.exportOMF === "function",
+              exportFinalCutProXML: typeof app.project.exportFinalCutProXML === "function"
+            },
+            limitations: [
+              "Premiere ExtendScript can enqueue AME jobs but does not expose detailed queue progress/status.",
+              "AME availability depends on the local Premiere/AME installation and version.",
+              "Interchange export behavior should be live-tested on disposable projects before production use."
+            ]
+          });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    diagnose_export_preset: {
+      description:
+        "Validate an AME .epr preset path and ask the active sequence which output extension it maps to, without exporting.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          preset_path: {
+            type: "string",
+            description: "Full path to the AME preset file (.epr).",
+          },
+        },
+        required: ["preset_path"],
+      },
+      handler: async (args: { preset_path: string }) => {
+        const script = buildToolScript(`
+          var seq = app.project.activeSequence;
+          if (!seq) return __error("No active sequence");
+          if (typeof seq.getExportFileExtension !== "function") {
+            return __error("getExportFileExtension is not available in this Premiere ExtendScript runtime");
+          }
+
+          var presetPath = "${escapeForExtendScript(args.preset_path)}";
+          var presetFile = new File(presetPath);
+          if (!presetFile.exists) return __error("Preset file not found: " + presetPath);
+
+          var lowerName = presetFile.name.toLowerCase();
+          if (lowerName.substr(lowerName.length - 4) !== ".epr") {
+            return __error("Export preset must be an .epr file: " + presetFile.name);
+          }
+
+          var extension = seq.getExportFileExtension(presetFile.fsName);
+          if (!extension) return __error("Premiere could not resolve an output extension for preset: " + presetFile.fsName);
+
+          return __result({
+            presetPath: presetFile.fsName,
+            exists: true,
+            activeSequence: seq.name,
+            outputExtension: extension,
+            encoderAvailable: !!app.encoder,
+            exported: false,
+            queued: false
+          });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
     export_sequence: {
       description: "Export the active sequence using Adobe Media Encoder",
       parameters: {
@@ -30,25 +149,33 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof seq.exportAsMediaDirect !== "function") {
+            return __error("exportAsMediaDirect is not available in this Premiere ExtendScript runtime");
+          }
           
           var outputPath = "${escapeForExtendScript(args.output_path)}";
           
           ${args.preset_path
-            ? `var presetPath = "${escapeForExtendScript(args.preset_path)}";`
+            ? `var presetPath = "${escapeForExtendScript(args.preset_path)}";
+               var presetFile = new File(presetPath);
+               if (!presetFile.exists) return __error("Preset file not found: " + presetPath);
+               presetPath = presetFile.fsName;`
             : `// Use default H.264 preset
                var presetPath = "";
                // Try common preset locations
                var presetFile = new File("/Applications/Adobe Media Encoder 2025/MediaIO/systempresets/4028/HDTV 1080p 29.97 High Quality.epr");
-               if (presetFile.exists) presetPath = presetFile.fsName;`
+               if (presetFile.exists) presetPath = presetFile.fsName;
+               if (!presetPath) return __error("preset_path is required; no bundled default AME preset was found");`
           }
           
           var exportResult = seq.exportAsMediaDirect(
             outputPath,
             presetPath,
-            ${args.work_area_only ? "app.encoder.ENCODE_WORKAREA" : "app.encoder.ENCODE_ENTIRE"}
+            ${args.work_area_only ? "2" : "0"}
           );
+          if (exportResult === false) return __error("exportAsMediaDirect returned false");
           
-          return __result({ exported: true, outputPath: outputPath });
+          return __result({ exported: true, outputPath: outputPath, presetPath: presetPath });
         `);
         return sendCommand(script, { ...bridgeOptions, timeoutMs: 120000 }); // 2 min timeout for exports
       },
@@ -98,15 +225,23 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             type: "string",
             description: "Full output file path (e.g., '/Users/me/export.xml')",
           },
+          suppress_ui: {
+            type: "boolean",
+            description: "Suppress Premiere export dialogs where supported (default: true).",
+          },
         },
         required: ["output_path"],
       },
-      handler: async (args: { output_path: string }) => {
+      handler: async (args: { output_path: string; suppress_ui?: boolean }) => {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof seq.exportAsFinalCutProXML !== "function") {
+            return __error("exportAsFinalCutProXML is not available in this Premiere ExtendScript runtime");
+          }
           
-          seq.exportAsFinalCutProXML("${escapeForExtendScript(args.output_path)}");
+          var result = seq.exportAsFinalCutProXML("${escapeForExtendScript(args.output_path)}", ${args.suppress_ui !== false ? "1" : "0"});
+          if (result === false) return __error("exportAsFinalCutProXML returned false");
           return __result({ exported: true, outputPath: "${escapeForExtendScript(args.output_path)}", format: "FCP XML" });
         `);
         return sendCommand(script, bridgeOptions);
@@ -151,14 +286,19 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof app.project.exportAAF !== "function") {
+            return __error("project.exportAAF is not available in this Premiere ExtendScript runtime");
+          }
           
-          seq.exportAsAAF(
+          var result = app.project.exportAAF(
+            seq,
             "${escapeForExtendScript(args.output_path)}",
             ${args.mix_down_video !== false ? 1 : 0},
             ${args.explode_to_mono ? 1 : 0},
             ${args.sample_rate ?? 48000},
             ${args.bits_per_sample ?? 16}
           );
+          if (result === false) return __error("project.exportAAF returned false");
           
           return __result({ exported: true, outputPath: "${escapeForExtendScript(args.output_path)}", format: "AAF" });
         `);
@@ -189,16 +329,21 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           
           var encoder = app.encoder;
           if (!encoder) return __error("Adobe Media Encoder not available");
+          if (typeof encoder.launchEncoder !== "function") return __error("encoder.launchEncoder is not available");
+          if (typeof encoder.encodeSequence !== "function") return __error("encoder.encodeSequence is not available");
           
           encoder.launchEncoder();
           
           var outputPath = "${escapeForExtendScript(args.output_path)}";
           ${args.preset_path
-            ? `var presetPath = "${escapeForExtendScript(args.preset_path)}";`
-            : `var presetPath = encoder.ENCODE_MATCH_SEQUENCE;`
+            ? `var presetPath = "${escapeForExtendScript(args.preset_path)}";
+               var presetFile = new File(presetPath);
+               if (!presetFile.exists) return __error("Preset file not found: " + presetPath);
+               presetPath = presetFile.fsName;`
+            : `return __error("preset_path is required when adding an AME queue item");`
           }
           
-          encoder.encodeSequence(
+          var jobId = encoder.encodeSequence(
             seq,
             outputPath,
             presetPath,
@@ -206,14 +351,14 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             1  // removeOnCompletion
           );
           
-          return __result({ queued: true, outputPath: outputPath });
+          return __result({ queued: true, started: false, outputPath: outputPath, presetPath: presetPath, jobId: jobId || null });
         `);
         return sendCommand(script, bridgeOptions);
       },
     },
 
     get_render_queue_status: {
-      description: "Get the current status of the Adobe Media Encoder render queue",
+      description: "Report available Adobe Media Encoder queue APIs and known status limitations",
       parameters: {},
       handler: async () => {
         const script = buildToolScript(`
@@ -221,8 +366,19 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           if (!encoder) return __error("Adobe Media Encoder not available");
           
           return __result({
+            readOnly: true,
+            encoderAvailable: true,
+            canLaunchEncoder: typeof encoder.launchEncoder === "function",
+            canEncodeSequence: typeof encoder.encodeSequence === "function",
+            canEncodeProjectItem: typeof encoder.encodeProjectItem === "function",
+            canEncodeFile: typeof encoder.encodeFile === "function",
+            canStartBatch: typeof encoder.startBatch === "function",
             isRunning: encoder.isRunning ? encoder.isRunning() : "unknown",
-            info: "Check Adobe Media Encoder application for detailed queue status"
+            detailedQueueStatusAvailable: false,
+            limitations: [
+              "Premiere ExtendScript does not expose detailed AME queue item progress or completion status.",
+              "Use Adobe Media Encoder itself for per-job progress, failure reason, and completion details."
+            ]
           });
         `);
         return sendCommand(script, bridgeOptions);
@@ -370,6 +526,10 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             type: "boolean",
             description: "Trim audio to used range plus handles (default: true)",
           },
+          include_pan: {
+            type: "boolean",
+            description: "Include pan information where supported (default: true)",
+          },
           handle_frames: {
             type: "number",
             description: "Handle length in frames when trimming (default: 1000)",
@@ -384,13 +544,17 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
         audio_encapsulated?: boolean;
         audio_file_format?: number;
         trim_audio_files?: boolean;
+        include_pan?: boolean;
         handle_frames?: number;
       }) => {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof app.project.exportOMF !== "function") {
+            return __error("project.exportOMF is not available in this Premiere ExtendScript runtime");
+          }
           
-          app.project.exportOMF(
+          var result = app.project.exportOMF(
             seq,
             "${escapeForExtendScript(args.output_path)}",
             "OMFTitle",
@@ -399,8 +563,10 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             ${args.audio_encapsulated !== false ? 1 : 0},
             ${args.audio_file_format ?? 1},
             ${args.trim_audio_files !== false ? 1 : 0},
+            ${args.include_pan !== false ? 1 : 0},
             ${args.handle_frames ?? 1000}
           );
+          if (result === false) return __error("project.exportOMF returned false");
           
           return __result({ exported: true, outputPath: "${escapeForExtendScript(args.output_path)}", format: "OMF" });
         `);
@@ -441,12 +607,20 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var item = __findProjectItem("${escapeForExtendScript(args.item_id)}");
           if (!item) return __error("Project item not found: ${escapeForExtendScript(args.item_id)}");
+          if (!app.encoder) return __error("Adobe Media Encoder not available");
+          if (typeof app.encoder.launchEncoder !== "function") return __error("encoder.launchEncoder is not available");
+          if (typeof app.encoder.encodeProjectItem !== "function") return __error("encoder.encodeProjectItem is not available");
+          if (typeof app.encoder.startBatch !== "function") return __error("encoder.startBatch is not available");
+
+          var presetPath = "${escapeForExtendScript(args.preset_path)}";
+          var presetFile = new File(presetPath);
+          if (!presetFile.exists) return __error("Preset file not found: " + presetPath);
           
           app.encoder.launchEncoder();
-          app.encoder.encodeProjectItem(
+          var jobId = app.encoder.encodeProjectItem(
             item,
             "${escapeForExtendScript(args.output_path)}",
-            "${escapeForExtendScript(args.preset_path)}",
+            presetFile.fsName,
             app.encoder.ENCODE_IN_TO_OUT,
             ${args.remove_on_completion !== false ? 1 : 0}
           );
@@ -455,7 +629,9 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           return __result({
             queued: true,
             item: item.name,
-            outputPath: "${escapeForExtendScript(args.output_path)}"
+            outputPath: "${escapeForExtendScript(args.output_path)}",
+            presetPath: presetFile.fsName,
+            jobId: jobId || null
           });
         `);
         return sendCommand(script, bridgeOptions);
@@ -510,15 +686,25 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           : `var srcOut = undefined;`;
 
         const script = buildToolScript(`
+          if (!app.encoder) return __error("Adobe Media Encoder not available");
+          if (typeof app.encoder.launchEncoder !== "function") return __error("encoder.launchEncoder is not available");
+          if (typeof app.encoder.encodeFile !== "function") return __error("encoder.encodeFile is not available");
+          if (typeof app.encoder.startBatch !== "function") return __error("encoder.startBatch is not available");
+
+          var inputFile = new File("${escapeForExtendScript(args.input_path)}");
+          if (!inputFile.exists) return __error("Input file not found: " + inputFile.fsName);
+          var presetFile = new File("${escapeForExtendScript(args.preset_path)}");
+          if (!presetFile.exists) return __error("Preset file not found: " + presetFile.fsName);
+
           app.encoder.launchEncoder();
           
           ${inPointCode}
           ${outPointCode}
           
-          app.encoder.encodeFile(
-            "${escapeForExtendScript(args.input_path)}",
+          var jobId = app.encoder.encodeFile(
+            inputFile.fsName,
             "${escapeForExtendScript(args.output_path)}",
-            "${escapeForExtendScript(args.preset_path)}",
+            presetFile.fsName,
             ${args.remove_on_completion !== false ? 1 : 0},
             srcIn,
             srcOut
@@ -527,11 +713,305 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           
           return __result({
             queued: true,
-            inputPath: "${escapeForExtendScript(args.input_path)}",
-            outputPath: "${escapeForExtendScript(args.output_path)}"
+            inputPath: inputFile.fsName,
+            outputPath: "${escapeForExtendScript(args.output_path)}",
+            presetPath: presetFile.fsName,
+            jobId: jobId || null
           });
         `);
         return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    batch_export_sequences: {
+      description:
+        "Queue multiple sequences in Adobe Media Encoder from explicit output/preset jobs. Does not start the queue unless start_queue is true.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          jobs: {
+            type: "array",
+            description:
+              "Array of jobs with output_path, preset_path, and optional sequence_id. sequence_id omitted uses the active sequence.",
+          },
+          work_area_type: {
+            type: "string",
+            enum: ["entire", "in_to_out", "work_area"],
+            description: "Range to encode for each sequence (default: entire).",
+          },
+          remove_on_completion: {
+            type: "boolean",
+            description: "Remove AME queue item on completion (default: true).",
+          },
+          start_queue: {
+            type: "boolean",
+            description: "Start the AME batch after queueing all valid jobs (default: false).",
+          },
+        },
+        required: ["jobs"],
+      },
+      handler: async (args: {
+        jobs: Array<{ sequence_id?: string; output_path?: string; outputPath?: string; preset_path?: string; presetPath?: string }>;
+        work_area_type?: string;
+        remove_on_completion?: boolean;
+        start_queue?: boolean;
+      }) => {
+        if (!Array.isArray(args.jobs) || args.jobs.length === 0) {
+          return { success: false, error: "jobs must be a non-empty array" };
+        }
+
+        const jobsLiteral = toExtendScriptJsonLiteral(args.jobs);
+        const workAreaType = workAreaTypeCode(args.work_area_type);
+
+        const script = buildToolScript(`
+          var encoder = app.encoder;
+          if (!encoder) return __error("Adobe Media Encoder not available");
+          if (typeof encoder.launchEncoder !== "function") return __error("encoder.launchEncoder is not available");
+          if (typeof encoder.encodeSequence !== "function") return __error("encoder.encodeSequence is not available");
+          if (${args.start_queue ? "true" : "false"} && typeof encoder.startBatch !== "function") {
+            return __error("encoder.startBatch is not available");
+          }
+
+          var jobs = ${jobsLiteral};
+          var queued = [];
+          var errors = [];
+          encoder.launchEncoder();
+
+          for (var i = 0; i < jobs.length; i++) {
+            var job = jobs[i];
+            var outputPath = job.output_path || job.outputPath;
+            var presetPath = job.preset_path || job.presetPath;
+            if (!outputPath) {
+              errors.push({ index: i, error: "Missing output_path" });
+              continue;
+            }
+            if (!presetPath) {
+              errors.push({ index: i, error: "Missing preset_path" });
+              continue;
+            }
+
+            var seq = job.sequence_id ? __findSequence(String(job.sequence_id)) : app.project.activeSequence;
+            if (!seq) {
+              errors.push({ index: i, outputPath: outputPath, error: "Sequence not found" });
+              continue;
+            }
+
+            var presetFile = new File(String(presetPath));
+            if (!presetFile.exists) {
+              errors.push({ index: i, sequence: seq.name, outputPath: outputPath, error: "Preset file not found: " + presetPath });
+              continue;
+            }
+
+            try {
+              var jobId = encoder.encodeSequence(
+                seq,
+                String(outputPath),
+                presetFile.fsName,
+                ${workAreaType},
+                ${args.remove_on_completion !== false ? 1 : 0}
+              );
+              queued.push({
+                index: i,
+                sequence: seq.name,
+                sequenceId: seq.sequenceID,
+                outputPath: String(outputPath),
+                presetPath: presetFile.fsName,
+                jobId: jobId || null
+              });
+            } catch(e) {
+              errors.push({ index: i, sequence: seq ? seq.name : null, outputPath: outputPath, error: e.toString() });
+            }
+          }
+
+          var started = false;
+          if (${args.start_queue ? "true" : "false"} && queued.length > 0) {
+            encoder.startBatch();
+            started = true;
+          }
+
+          return __result({
+            queued: queued.length,
+            failed: errors.length,
+            started: started,
+            workAreaType: "${escapeForExtendScript(args.work_area_type || "entire")}",
+            jobs: queued,
+            errors: errors
+          });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    batch_export_interchange: {
+      description:
+        "Export active, selected, or all sequences to FCP XML, AAF, and/or OMF interchange files in one pass.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          output_directory: {
+            type: "string",
+            description: "Existing folder where interchange files should be written.",
+          },
+          formats: {
+            type: "array",
+            description: "Array containing one or more of: fcp_xml, aaf, omf.",
+          },
+          sequence_ids: {
+            type: "array",
+            description: "Optional sequence IDs/names to export. Omit to use the active sequence.",
+          },
+          include_all_sequences: {
+            type: "boolean",
+            description: "Export every sequence in the project instead of only the active sequence.",
+          },
+          suppress_ui: {
+            type: "boolean",
+            description: "Suppress dialogs where supported (default: true).",
+          },
+          sample_rate: {
+            type: "number",
+            description: "AAF/OMF audio sample rate (default: 48000).",
+          },
+          bits_per_sample: {
+            type: "number",
+            description: "AAF/OMF audio bit depth (default: 16).",
+          },
+          handle_frames: {
+            type: "number",
+            description: "OMF handle length in frames when trimming (default: 1000).",
+          },
+        },
+        required: ["output_directory", "formats"],
+      },
+      handler: async (args: {
+        output_directory: string;
+        formats: string[];
+        sequence_ids?: string[];
+        include_all_sequences?: boolean;
+        suppress_ui?: boolean;
+        sample_rate?: number;
+        bits_per_sample?: number;
+        handle_frames?: number;
+      }) => {
+        const allowedFormats = new Set(["fcp_xml", "aaf", "omf"]);
+        const formats = Array.isArray(args.formats)
+          ? args.formats.filter((format) => allowedFormats.has(format))
+          : [];
+        if (formats.length === 0) {
+          return { success: false, error: "formats must include at least one of: fcp_xml, aaf, omf" };
+        }
+
+        const formatsLiteral = toExtendScriptJsonLiteral(formats);
+        const sequenceIdsLiteral = toExtendScriptJsonLiteral(args.sequence_ids || []);
+
+        const script = buildToolScript(`
+          var outputFolder = new Folder("${escapeForExtendScript(args.output_directory)}");
+          if (!outputFolder.exists) return __error("Output directory not found: ${escapeForExtendScript(args.output_directory)}");
+
+          var formats = ${formatsLiteral};
+          var sequenceIds = ${sequenceIdsLiteral};
+          var sequences = [];
+          var errors = [];
+          var exported = [];
+
+          function safeFileName(name) {
+            return String(name).replace(/[\\\\\\/:*?"<>|]/g, "_");
+          }
+
+          if (${args.include_all_sequences ? "true" : "false"}) {
+            for (var s = 0; s < app.project.sequences.numSequences; s++) {
+              sequences.push(app.project.sequences[s]);
+            }
+          } else if (sequenceIds.length > 0) {
+            for (var i = 0; i < sequenceIds.length; i++) {
+              var foundSeq = __findSequence(String(sequenceIds[i]));
+              if (foundSeq) {
+                sequences.push(foundSeq);
+              } else {
+                errors.push({ sequenceId: String(sequenceIds[i]), error: "Sequence not found" });
+              }
+            }
+          } else if (app.project.activeSequence) {
+            sequences.push(app.project.activeSequence);
+          }
+
+          if (sequences.length === 0) return __error("No sequences selected for interchange export");
+
+          for (var q = 0; q < sequences.length; q++) {
+            var seq = sequences[q];
+            var basePath = outputFolder.fsName + "/" + safeFileName(seq.name);
+            for (var f = 0; f < formats.length; f++) {
+              var format = formats[f];
+              try {
+                if (format === "fcp_xml") {
+                  if (typeof seq.exportAsFinalCutProXML !== "function") {
+                    errors.push({ sequence: seq.name, format: format, error: "exportAsFinalCutProXML is not available" });
+                    continue;
+                  }
+                  var xmlPath = basePath + ".xml";
+                  var xmlResult = seq.exportAsFinalCutProXML(xmlPath, ${args.suppress_ui !== false ? "1" : "0"});
+                  if (xmlResult === false) {
+                    errors.push({ sequence: seq.name, format: format, outputPath: xmlPath, error: "exportAsFinalCutProXML returned false" });
+                  } else {
+                    exported.push({ sequence: seq.name, format: format, outputPath: xmlPath });
+                  }
+                } else if (format === "aaf") {
+                  if (typeof app.project.exportAAF !== "function") {
+                    errors.push({ sequence: seq.name, format: format, error: "project.exportAAF is not available" });
+                    continue;
+                  }
+                  var aafPath = basePath + ".aaf";
+                  var aafResult = app.project.exportAAF(
+                    seq,
+                    aafPath,
+                    1,
+                    0,
+                    ${args.sample_rate ?? 48000},
+                    ${args.bits_per_sample ?? 16}
+                  );
+                  if (aafResult === false) {
+                    errors.push({ sequence: seq.name, format: format, outputPath: aafPath, error: "project.exportAAF returned false" });
+                  } else {
+                    exported.push({ sequence: seq.name, format: format, outputPath: aafPath });
+                  }
+                } else if (format === "omf") {
+                  if (typeof app.project.exportOMF !== "function") {
+                    errors.push({ sequence: seq.name, format: format, error: "project.exportOMF is not available" });
+                    continue;
+                  }
+                  var omfPath = basePath + ".omf";
+                  var omfResult = app.project.exportOMF(
+                    seq,
+                    omfPath,
+                    safeFileName(seq.name),
+                    ${args.sample_rate ?? 48000},
+                    ${args.bits_per_sample ?? 16},
+                    1,
+                    1,
+                    1,
+                    1,
+                    ${args.handle_frames ?? 1000}
+                  );
+                  if (omfResult === false) {
+                    errors.push({ sequence: seq.name, format: format, outputPath: omfPath, error: "project.exportOMF returned false" });
+                  } else {
+                    exported.push({ sequence: seq.name, format: format, outputPath: omfPath });
+                  }
+                }
+              } catch(e) {
+                errors.push({ sequence: seq.name, format: format, error: e.toString() });
+              }
+            }
+          }
+
+          return __result({
+            exported: exported.length,
+            failed: errors.length,
+            files: exported,
+            errors: errors
+          });
+        `);
+        return sendCommand(script, { ...bridgeOptions, timeoutMs: 300000 });
       },
     },
 

@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 const siteUrl = "https://premiere-pro-mcp.fly.dev";
 const title = "Premiere Pro MCP – AI Control for Adobe Premiere Pro";
 const description =
-  "Give AI full control over Adobe Premiere Pro. 269 tools across 28 modules for automated video editing via the Model Context Protocol (MCP).";
+  "Give AI full control over Adobe Premiere Pro. 278 tools across 28 modules for automated video editing via the Model Context Protocol (MCP).";
 
 export const metadata: Metadata = {
   title,
