@@ -169,12 +169,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 266 tools", () => {
+  it("all modules together have 267 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(266);
+    expect(total).toBe(267);
   });
 
   it("there are 28 modules", () => {
@@ -189,6 +189,20 @@ describe("Tool Handler Behavior", () => {
   });
 
   describe("health.ping", () => {
+    it("fork_ping returns fork info without bridge I/O", async () => {
+      const tools = getHealthTools(bridgeOptions);
+      const result = await (tools.fork_ping.handler as any)({});
+
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({
+        ok: true,
+        fork: "Maciejdziuba/premiere-pro-mcp",
+        requiresPremiere: false,
+        requiresCepBridge: false,
+      });
+    });
+
     it("calls sendCommand with shortened timeout", async () => {
       const tools = getHealthTools(bridgeOptions);
       await (tools.ping.handler as any)({});
