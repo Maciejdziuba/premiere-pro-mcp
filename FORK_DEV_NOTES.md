@@ -1,5 +1,7 @@
 # Fork Development Notes
 
+Notes for working on this fork: how to build it, how the pieces fit together, and how to add new tools. This MCP server lets an AI client drive Adobe Premiere Pro through a small bridge.
+
 ## Repo
 
 - Fork URL: https://github.com/Maciejdziuba/premiere-pro-mcp
@@ -21,7 +23,7 @@ npm test
 
 ## Local MCP Config Example
 
-Repo-local example: [`.mcp.local.example.json`](.mcp.local.example.json)
+This tells an MCP client (such as Claude Code) how to launch the built server. A repo-local copy lives at [`.mcp.local.example.json`](.mcp.local.example.json).
 
 ```json
 {
@@ -49,7 +51,7 @@ Do not run the command unless you want to modify Claude Code's MCP config.
 
 ## CEP Bridge Install Later
 
-The bridge panel lives in `cep-plugin/`. Later, when ready for Premiere testing, run:
+CEP is Adobe's panel framework; the panel is what relays commands into Premiere. The bridge panel lives in `cep-plugin/`. Later, when ready for Premiere testing, run:
 
 ```bash
 npm run install-cep
@@ -58,6 +60,8 @@ npm run install-cep
 That script symlinks `cep-plugin/` into the Adobe CEP extensions folder and enables unsigned CEP extensions/debug mode. It changes user-level Adobe settings, so keep it out of automated setup.
 
 ## How Tools Are Wired
+
+The flow is: MCP client → server → file bridge → CEP panel → ExtendScript in Premiere, and back.
 
 - `src/index.ts` starts the stdio MCP server and passes `PREMIERE_TEMP_DIR`/`PREMIERE_TIMEOUT_MS` into the bridge.
 - `src/server.ts` imports every `get*Tools()` module from `src/tools/`, merges their tool maps, converts JSON-schema-like parameters to Zod, and registers each tool with the MCP SDK.
