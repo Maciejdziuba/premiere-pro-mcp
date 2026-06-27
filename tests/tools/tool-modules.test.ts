@@ -65,7 +65,7 @@ const ALL_MODULES: Array<{
   { name: "media", getter: getMediaTools, minTools: 12 },
   { name: "sequence", getter: getSequenceTools, minTools: 8 },
   { name: "timeline", getter: getTimelineTools, minTools: 8 },
-  { name: "effects", getter: getEffectsTools, minTools: 6 },
+  { name: "effects", getter: getEffectsTools, minTools: 9 },
   { name: "transitions", getter: getTransitionsTools, minTools: 3 },
   { name: "audio", getter: getAudioTools, minTools: 2 },
   { name: "text", getter: getTextTools, minTools: 2 },
@@ -79,7 +79,7 @@ const ALL_MODULES: Array<{
   { name: "scripting", getter: getScriptingTools, minTools: 3 },
   { name: "inspection", getter: getInspectionTools, minTools: 5 },
   { name: "selection", getter: getSelectionTools, minTools: 5 },
-  { name: "clipboard", getter: getClipboardTools, minTools: 4 },
+  { name: "clipboard", getter: getClipboardTools, minTools: 8 },
   { name: "source-monitor", getter: getSourceMonitorTools, minTools: 5 },
   { name: "track-targeting", getter: getTrackTargetingTools, minTools: 20 },
   { name: "utility", getter: getUtilityTools, minTools: 15 },
@@ -169,12 +169,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 269 tools", () => {
+  it("all modules together have 272 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(269);
+    expect(total).toBe(272);
   });
 
   it("there are 28 modules", () => {
@@ -532,6 +532,67 @@ describe("Tool Handler Behavior", () => {
       const tools = getProjectManagerTools(bridgeOptions);
       expect(tools.consolidate_and_transfer).toBeDefined();
       expect(typeof tools.consolidate_and_transfer.handler).toBe("function");
+    });
+  });
+
+  describe("lumetri color tools", () => {
+    it("color_correct uses Lumetri helper lookup and optional controls", async () => {
+      const tools = getEffectsTools(bridgeOptions);
+      await (tools.color_correct.handler as any)({
+        node_id: "clip-1",
+        exposure: 1.25,
+        vibrance: 20,
+        vignette_amount: -30,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__mcpApplyLumetriValues");
+      expect(script).toContain("__findLumetriComponent");
+      expect(script).toContain('"exposure":1.25');
+      expect(script).toContain('"vibrance":20');
+      expect(script).toContain('"vignette_amount":-30');
+      expect(script).toContain("Optional Lumetri Creative and Vignette controls");
+    });
+
+    it("apply_lut can target the Creative Lumetri LUT slot", async () => {
+      const tools = getEffectsTools(bridgeOptions);
+      await (tools.apply_lut.handler as any)({
+        node_id: "clip-1",
+        lut_path: "/tmp/look.cube",
+        lut_slot: "creative",
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain('__mcpApplyLumetriValues');
+      expect(script).toContain('values["creative_lut"]');
+      expect(script).toContain("/tmp/look.cube");
+    });
+
+    it("copy_lumetri_grade reads a serializable Lumetri grade", async () => {
+      const tools = getClipboardTools(bridgeOptions);
+      await (tools.copy_lumetri_grade.handler as any)({
+        source_node_id: "source-clip",
+        property_keys: ["exposure", "vibrance"],
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__mcpValidateLumetriKeys");
+      expect(script).toContain("__mcpReadLumetriGrade");
+      expect(script).toContain('"exposure","vibrance"');
+    });
+
+    it("paste_lumetri_grade applies a copied grade to target clips", async () => {
+      const tools = getClipboardTools(bridgeOptions);
+      await (tools.paste_lumetri_grade.handler as any)({
+        target_node_ids: ["target-a", "target-b"],
+        grade: { properties: { exposure: 0.5, saturation: 110 } },
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("__mcpNormalizeLumetriGrade");
+      expect(script).toContain("__mcpApplyLumetriValues");
+      expect(script).toContain('"target-a","target-b"');
+      expect(script).toContain('"saturation":110');
     });
   });
 });

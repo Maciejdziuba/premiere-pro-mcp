@@ -26,14 +26,7 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           
           var clip = result.clip;
           var effectName = "${escapeForExtendScript(args.effect_name)}";
-          var comp = null;
-          
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === effectName || clip.components[i].matchName === effectName) {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var comp = __findComponent(clip, effectName, effectName);
           
           if (!comp) return __error("Effect not found: " + effectName);
           
@@ -92,29 +85,19 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
-          if (!comp) return __error("Effect not found: ${escapeForExtendScript(args.effect_name)}");
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
+          if (!comp) return __error("Effect not found: " + effectName);
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
-          if (!prop) return __error("Property not found: ${escapeForExtendScript(args.property_name)}");
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
+          if (!prop) return __error("Property not found: " + propertyName);
           
           prop.setValue(${args.value}, true);
           return __result({
             set: true,
-            effect: "${escapeForExtendScript(args.effect_name)}",
-            property: "${escapeForExtendScript(args.property_name)}",
+            effect: effectName,
+            property: propertyName,
             value: ${args.value}
           });
         `);
@@ -148,22 +131,12 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
           if (!comp) return __error("Effect not found");
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
           if (!prop) return __error("Property not found");
           
           var isTimeVarying = false;
@@ -188,8 +161,8 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           }
           
           return __result({
-            effect: "${escapeForExtendScript(args.effect_name)}",
-            property: "${escapeForExtendScript(args.property_name)}",
+            effect: effectName,
+            property: propertyName,
             isTimeVarying: true,
             keyframes: keyframes
           });
@@ -238,22 +211,12 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
           if (!comp) return __error("Effect not found");
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
           if (!prop) return __error("Property not found");
           
           // Enable keyframes if not already
@@ -270,8 +233,8 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           
           return __result({
             added: true,
-            effect: "${escapeForExtendScript(args.effect_name)}",
-            property: "${escapeForExtendScript(args.property_name)}",
+            effect: effectName,
+            property: propertyName,
             time: ${args.time_seconds},
             value: ${args.value}
           });
@@ -310,22 +273,12 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
           if (!comp) return __error("Effect not found");
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
           if (!prop) return __error("Property not found");
           
           var time = new Time();
@@ -334,8 +287,8 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           
           return __result({
             removed: true,
-            effect: "${escapeForExtendScript(args.effect_name)}",
-            property: "${escapeForExtendScript(args.property_name)}",
+            effect: effectName,
+            property: propertyName,
             time: ${args.time_seconds}
           });
         `);
@@ -383,22 +336,12 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
           if (!comp) return __error("Effect not found");
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
           if (!prop) return __error("Property not found");
           
           var startTime = new Time();
@@ -409,8 +352,8 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           
           return __result({
             removed: true,
-            effect: "${escapeForExtendScript(args.effect_name)}",
-            property: "${escapeForExtendScript(args.property_name)}",
+            effect: effectName,
+            property: propertyName,
             range: { start: ${args.start_seconds}, end: ${args.end_seconds} }
           });
         `);
@@ -462,22 +405,12 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
           if (!comp) return __error("Effect not found");
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
           if (!prop) return __error("Property not found");
           
           var time = new Time();
@@ -524,22 +457,12 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           if (!result) return __error("Clip not found");
           
           var clip = result.clip;
-          var comp = null;
-          for (var i = 0; i < clip.components.numItems; i++) {
-            if (clip.components[i].displayName === "${escapeForExtendScript(args.effect_name)}" || clip.components[i].matchName === "${escapeForExtendScript(args.effect_name)}") {
-              comp = clip.components[i];
-              break;
-            }
-          }
+          var effectName = "${escapeForExtendScript(args.effect_name)}";
+          var propertyName = "${escapeForExtendScript(args.property_name)}";
+          var comp = __findComponent(clip, effectName, effectName);
           if (!comp) return __error("Effect not found");
           
-          var prop = null;
-          for (var p = 0; p < comp.properties.numItems; p++) {
-            if (comp.properties[p].displayName === "${escapeForExtendScript(args.property_name)}") {
-              prop = comp.properties[p];
-              break;
-            }
-          }
+          var prop = __findPropertyDeep(comp, propertyName, propertyName, 8);
           if (!prop) return __error("Property not found");
           
           var time = new Time();
@@ -547,8 +470,8 @@ export function getKeyframeTools(bridgeOptions: BridgeOptions) {
           var value = prop.getValueAtTime(time);
           
           return __result({
-            effect: "${escapeForExtendScript(args.effect_name)}",
-            property: "${escapeForExtendScript(args.property_name)}",
+            effect: effectName,
+            property: propertyName,
             time: ${args.time_seconds},
             value: value
           });

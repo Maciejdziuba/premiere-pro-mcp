@@ -6,7 +6,7 @@ Current source of truth:
 
 - `src/server.ts` registers tools by spreading 28 `get*Tools()` modules.
 - `tests/tools/tool-modules.test.ts` and `npm run validate:tools` validate the catalog.
-- After Agent G, the implementation exposes 269 tools across 28 modules, matching README/package metadata.
+- After Agent D Lumetri/color work, the implementation exposes 272 tools across 28 modules, matching README/package metadata.
 
 ## Current module inventory
 
@@ -15,9 +15,9 @@ Current source of truth:
 | `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching color/effect/export helpers. |
 | `src/tools/audio.ts` | 3 | Dedicated audio levels/keyframes/mute | E | Small surface; audio property lookup should use shared helpers. |
 | `src/tools/captions.ts` | 1 | Caption track creation | F | Caption import/edit/export remains thin. |
-| `src/tools/clipboard.ts` | 6 | Effect copy, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Uses display-name matching in places. |
+| `src/tools/clipboard.ts` | 8 | Effect copy, Lumetri grade copy/paste, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Lumetri grade tools use helper lookup; generic effect copy still needs broader migration. |
 | `src/tools/discovery.ts` | 10 | Project, item, sequence, clip discovery | G | Read-oriented foundation for safe planning. |
-| `src/tools/effects.ts` | 8 | Video/audio effects, Lumetri basics, LUT, stabilization | F, with D owning Lumetri/color | Highest D/F overlap. |
+| `src/tools/effects.ts` | 9 | Video/audio effects, fuller Lumetri controls, LUT, batch color, stabilization | F, with D owning Lumetri/color | Highest D/F overlap; optional Lumetri Creative/Vignette controls need live validation. |
 | `src/tools/export.ts` | 12 | Export, frame capture, interchange, AME/proxy operations | F | Needs live AME/Premiere validation beyond unit tests. |
 | `src/tools/health.ts` | 4 | Fork ping, bridge diagnostics, live health/runtime diagnostics | G | `fork_ping` and `bridge_diagnostics` do not contact Premiere; `ping` and runtime diagnostics do. |
 | `src/tools/inspection.ts` | 10 | Deep read-only project/sequence/clip reports | G | Used by safe runtime sweep. |
@@ -41,7 +41,7 @@ Current source of truth:
 | `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer better-owned modules for new broad features. |
 | `src/tools/workspace.ts` | 2 | Workspace list/switch | G | Diagnostics/workflow support. |
 
-Total: 269 tools across 28 modules.
+Total: 272 tools across 28 modules.
 
 ## Missing target categories
 
@@ -49,7 +49,7 @@ Total: 269 tools across 28 modules.
 |---|---|---|---|
 | Locale-resilient component/property lookup | Shared helpers that match by `matchName` first, localized display name second, including nested property groups | B | Added in `src/bridge/script-builder.ts` and documented in `LOCALE_HELPERS.md`; C/D/E/F should migrate tools to use it. |
 | Timeline/sequence breadth | Safer add/move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists; QE/index-based operations need clearer failure modes and live notes. |
-| Lumetri/color breadth | Fuller Lumetri controls, LUT handling, grade copy/paste, batch color application | D | Current coverage is basic `color_correct`, `apply_lut`, `set_color_value`, and generic keyframe/property tools. |
+| Lumetri/color breadth | Fuller Lumetri controls, LUT handling, grade copy/paste, batch color application | D | Added `batch_color_correct`, `copy_lumetri_grade`, and `paste_lumetri_grade`; expanded `color_correct`/`apply_lut`; migrated color/keyframe lookup to shared helpers where feasible. Optional Creative/Vignette aliases need live Premiere validation. |
 | Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` has 3 tools; additional audio behavior is scattered elsewhere. |
 | Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Existing tools cover basics; many paths need helper lookup and live validation. |
 | Diagnostics/testing/docs | Bridge/version/locale readouts, safe read-only runtime sweep, schema validation, live-test notes | G | Added `bridge_diagnostics`, `get_premiere_runtime_diagnostics`, `validate:tools`, and `diagnostics:sweep`. |
