@@ -6,7 +6,7 @@ This fork already has a large Premiere MCP surface. The next step is not just â€
 
 | Category | Module/file | Current coverage | Owner |
 |---|---|---:|---|
-| Discovery/project state | `src/tools/discovery.ts`, `inspection.ts`, `scripting.ts`, `health.ts` | 28 tools | G |
+| Discovery/project state | `src/tools/discovery.ts`, `inspection.ts`, `scripting.ts`, `health.ts` | 30 tools | G |
 | Project/media/bins | `src/tools/project.ts`, `media.ts`, `metadata.ts`, `project-manager.ts` | 51 tools | G/F as needed |
 | Sequence/timeline/editing | `src/tools/sequence.ts`, `timeline.ts`, `advanced.ts`, `selection.ts`, `playhead.ts`, `tracks.ts`, `track-targeting.ts`, `source-monitor.ts` | 108 tools | C |
 | Effects/transitions | `src/tools/effects.ts`, `transitions.ts`, `clipboard.ts`, parts of `advanced.ts` | 19 tools | F/D split |
@@ -26,7 +26,7 @@ This fork already has a large Premiere MCP surface. The next step is not just â€
 | Lumetri/color breadth | Fuller Lumetri controls, LUTs, grade copy/paste, batch application | D | Owns color/effect additions. Do not edit generic transition/audio modules. |
 | Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, normalization/diagnostics where feasible | E | Owns `src/tools/audio.ts` and audio-specific tests/docs sections. |
 | Effects/transitions/captions/export | Lookup, batch effects/transitions, SRT/caption, AME/export/interchange improvements | F | Owns `effects.ts`, `transitions.ts`, `captions.ts`, `export.ts`, with D owning Lumetri-specific logic. |
-| Diagnostics/testing/docs | Bridge health, locale/version readouts, safe runtime sweep, schema validation, notes | G | Owns diagnostics additions, scripts, docs. Coordinate before touching shared tests. |
+| Diagnostics/testing/docs | Bridge health, locale/version readouts, safe runtime sweep, schema validation, notes | G | Added `bridge_diagnostics`, `get_premiere_runtime_diagnostics`, `scripts/validate-tool-catalog.mjs`, and `scripts/safe-runtime-sweep.mjs`. Live Premiere checks still required. |
 | Architecture map | Keep this matrix current and document extension rules | A | Owns `FEATURE_MATRIX.md`; may touch docs only. |
 
 ## Helper workstreams
@@ -39,7 +39,25 @@ This fork already has a large Premiere MCP surface. The next step is not just â€
 | D â€” Lumetri/color tools | `agent-d-lumetri-color` | `src/tools/effects.ts`, `tests/tools/*` for color assertions | `npm run build && npm test` | Color controls implemented or limitations documented. |
 | E â€” Audio tools | `agent-e-audio-tools` | `src/tools/audio.ts`, audio-specific docs/tests | `npm run build && npm test` | Feasible audio tools added; unsupported APIs return honest errors. |
 | F â€” Effects/transitions/captions/export | `agent-f-effects-export` | `src/tools/transitions.ts`, `captions.ts`, `export.ts`; generic non-Lumetri effects only | `npm run build && npm test` | Feature group improved or blockers documented. |
-| G â€” Diagnostics/testing/docs | `agent-g-diagnostics-docs` | `src/tools/health.ts`, `src/tools/inspection.ts`, `scripts/`, `tests/`, `FORK_DEV_NOTES.md` | `npm run build && npm test` plus any new validation script | Diagnostics/docs/validation pass; live-test needs listed. |
+| G â€” Diagnostics/testing/docs | `agent-g-diagnostics-docs` | `src/tools/health.ts`, `src/tools/inspection.ts`, `scripts/`, `tests/`, `FORK_DEV_NOTES.md` | `npm run build && npm test && npm run validate:tools` plus `npm run diagnostics:sweep -- --dry-run` | Diagnostics/docs/validation pass; live-test needs listed. |
+
+## Diagnostics status
+
+Static diagnostics now cover:
+
+- `fork_ping`: fork metadata without Premiere or CEP.
+- `bridge_diagnostics`: package version, Node runtime, effective bridge temp directory, timeout, pending `cmd_`/`res_` files, and warnings without contacting Premiere.
+- `ping`: live CEP/Premiere connectivity plus Premiere version/build, ExtendScript locale/OS, project, active sequence, and QE availability readout.
+- `get_premiere_runtime_diagnostics`: read-only live runtime details for version/locale validation, BridgeTalk identifiers, project/sequence state, and capability probes without enabling QE.
+- `npm run validate:tools`: built catalog validation for 269 tools, duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema property metadata.
+- `npm run diagnostics:sweep`: read-only live sweep. Defaults to local bridge diagnostics plus lightweight live version/locale/runtime checks; `--include-project` adds project overview, timeline summary, and offline-media reads.
+
+Remaining live validation:
+
+- Run `npm run diagnostics:sweep` with Premiere open, the MCP Bridge CEP panel running, and `PREMIERE_TEMP_DIR` matching the panel.
+- Run `npm run diagnostics:sweep -- --include-project` on a small known project to confirm project scans remain read-only and finish within the configured timeout.
+- Capture outputs from at least one non-English Premiere UI locale to confirm `$.locale`, `app.isoLanguage` where available, and localized project names are reported correctly.
+- Confirm `bridge_diagnostics` identifies stale `cmd_`/`res_` files after a forced bridge interruption, then verify normal cleanup on the next server start.
 
 ## Conflict boundaries
 
@@ -56,4 +74,5 @@ This fork already has a large Premiere MCP surface. The next step is not just â€
 1. Land B first if it changes shared ExtendScript helpers.
 2. Land A/G docs updates around the current architecture.
 3. Land C, D, E, and F as independent feature groups with `npm run build && npm test` after each merge.
-4. Run final `npm run build && npm test`, then safe read-only Premiere checks only if the bridge is still connected.
+4. Run final `npm run build && npm test && npm run validate:tools`, then `npm run diagnostics:sweep -- --dry-run`.
+5. Run safe read-only Premiere checks only if the bridge is connected; do not install CEP or modify global Adobe settings as part of automated validation.

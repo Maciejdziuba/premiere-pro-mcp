@@ -83,7 +83,7 @@ const ALL_MODULES: Array<{
   { name: "source-monitor", getter: getSourceMonitorTools, minTools: 5 },
   { name: "track-targeting", getter: getTrackTargetingTools, minTools: 20 },
   { name: "utility", getter: getUtilityTools, minTools: 15 },
-  { name: "health", getter: getHealthTools, minTools: 1 },
+  { name: "health", getter: getHealthTools, minTools: 4 },
   { name: "workspace", getter: getWorkspaceTools, minTools: 2 },
   { name: "captions", getter: getCaptionTools, minTools: 1 },
   { name: "playback", getter: getPlaybackTools, minTools: 3 },
@@ -169,12 +169,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 267 tools", () => {
+  it("all modules together have 269 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(267);
+    expect(total).toBe(269);
   });
 
   it("there are 28 modules", () => {
@@ -203,6 +203,26 @@ describe("Tool Handler Behavior", () => {
       });
     });
 
+    it("bridge_diagnostics returns local bridge details without bridge I/O", async () => {
+      const tools = getHealthTools(bridgeOptions);
+      const result = await (tools.bridge_diagnostics.handler as any)({});
+
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({
+        readOnly: true,
+        package: "premiere-pro-mcp",
+        bridge: {
+          tempDir: "/tmp/test",
+          timeoutMs: 5000,
+        },
+        requiresPremiere: false,
+        requiresCepBridge: false,
+      });
+      expect(typeof (result.data as any).packageVersion).toBe("string");
+      expect(Array.isArray((result.data as any).warnings)).toBe(true);
+    });
+
     it("calls sendCommand with shortened timeout", async () => {
       const tools = getHealthTools(bridgeOptions);
       await (tools.ping.handler as any)({});
@@ -223,6 +243,22 @@ describe("Tool Handler Behavior", () => {
       expect(script).toContain("app.project");
       expect(script).toContain("__result");
       expect(script).toContain("connected: true");
+      expect(script).toContain("premiereVersion");
+      expect(script).toContain("$.locale");
+      expect(script).toContain("hasEnableQE");
+    });
+
+    it("get_premiere_runtime_diagnostics reads version and locale without enabling QE", async () => {
+      const tools = getHealthTools(bridgeOptions);
+      await (tools.get_premiere_runtime_diagnostics.handler as any)({});
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      expect(script).toContain("readOnly: true");
+      expect(script).toContain("premiereVersion");
+      expect(script).toContain("$.locale");
+      expect(script).toContain("BridgeTalk");
+      expect(script).toContain("enabledByThisTool: false");
+      expect(script).not.toMatch(/app\.enableQE\s*\(/);
     });
   });
 
