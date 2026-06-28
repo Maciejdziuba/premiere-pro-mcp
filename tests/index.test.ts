@@ -11,6 +11,7 @@ describe("CLI flags", () => {
     expect(output).toContain("premiere-pro-mcp");
     expect(output).toContain("Usage:");
     expect(output).toContain("--install-cep");
+    expect(output).toContain("--install-uxp");
     expect(output).toContain("PREMIERE_TEMP_DIR");
     expect(output).toContain("PREMIERE_TIMEOUT_MS");
   });
@@ -18,6 +19,18 @@ describe("CLI flags", () => {
   it("-h is an alias for --help", () => {
     const output = execFileSync("node", [BIN, "-h"], { encoding: "utf-8" });
     expect(output).toContain("Usage:");
+  });
+
+  it("--install-uxp prints UDT loading guidance and exits 0", () => {
+    const output = execFileSync(
+      "node",
+      [BIN, "--install-uxp", "--manifest", "/tmp/premiere-mcp-missing-uxp-manifest.json"],
+      { encoding: "utf-8" }
+    );
+
+    expect(output).toContain("Preparing UXP panel loading instructions");
+    expect(output).toContain("Adobe UXP Developer Tool");
+    expect(output).toContain("Load or Load & Watch");
   });
 
   it("--version prints a semver version and exits 0", () => {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const SCRIPT = join(process.cwd(), "scripts", "safe-runtime-sweep.mjs");
@@ -13,11 +15,13 @@ describe("safe-runtime-sweep CLI", () => {
     const output = runSweep();
 
     expect(output).toContain("Dry run: no dist import and no Premiere bridge contact.");
+    expect(output).toContain("UXP transcript status: OFFLINE");
+    expect(output).toContain("uxp-transcript-status.json");
     expect(output).toContain("Static contract checks:");
     expect(output).toContain("PASS auto_reframe_signature");
     expect(output).toContain("PASS text_overlay_styling");
     expect(output).toContain("PASS frame_capture_export_capability");
-    expect(output).toContain("PASS transcript_capability_not_advertised");
+    expect(output).toContain("PASS transcript_uxp_sidecar_bridge");
   });
 
   it("prints machine-readable dry-run contract labels", () => {
@@ -31,13 +35,20 @@ describe("safe-runtime-sweep CLI", () => {
         knownGaps: 0,
         checks: expect.any(Array),
       },
+      uxpStatus: {
+        name: "uxp_transcript_bridge_status",
+        source: "uxp-panel",
+        status: "offline",
+        online: false,
+        contactsPremiere: false,
+      },
     });
     expect(payload.contractSummary.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: "auto_reframe_signature", status: "pass" }),
         expect.objectContaining({ id: "text_overlay_styling", status: "pass" }),
         expect.objectContaining({ id: "frame_capture_export_capability", status: "pass" }),
-        expect.objectContaining({ id: "transcript_capability_not_advertised", status: "pass" }),
+        expect.objectContaining({ id: "transcript_uxp_sidecar_bridge", status: "pass" }),
       ])
     );
     expect(payload.liveProbePlan).toEqual(
@@ -45,6 +56,44 @@ describe("safe-runtime-sweep CLI", () => {
         expect.stringContaining("MCP_TEST_VALIDATE_* scratch sequence"),
         expect.stringContaining("probe exportFramePNG capability without exporting"),
       ])
+    );
+  });
+
+  it("reports an online UXP transcript status file without contacting Premiere", () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-uxp-status-"));
+    const statusPath = join(tempDir, "uxp-transcript-status.json");
+    writeFileSync(
+      statusPath,
+      JSON.stringify({
+        panel: "uxp-panel",
+        bridgeKind: "UXP",
+        online: true,
+        transcript: {
+          online: true,
+          hasPremiereProModule: true,
+          hasTranscriptApis: true,
+          supportedApis: ["Transcript.exportToJSON", "Transcript.importFromJSON"],
+        },
+      }),
+      "utf-8"
+    );
+
+    const output = runSweep(["--dry-run", "--json", "--uxp-status-file", statusPath]);
+    const payload = JSON.parse(output);
+
+    expect(payload).toMatchObject({
+      readOnly: true,
+      contactsPremiere: false,
+      uxpStatus: {
+        source: "uxp-panel",
+        status: "online",
+        online: true,
+        hasPremiereProModule: true,
+        hasTranscriptApis: true,
+      },
+    });
+    expect(payload.uxpStatus.supportedApis).toEqual(
+      expect.arrayContaining(["Transcript.exportToJSON", "Transcript.importFromJSON"])
     );
   });
 

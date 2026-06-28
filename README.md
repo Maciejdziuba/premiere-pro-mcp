@@ -6,7 +6,7 @@
 
 **Give AI full control over Adobe Premiere Pro.**
 
-297 tools across 28 modules — the most comprehensive MCP server for video editing.
+301 tools across 28 modules — the most comprehensive MCP server for video editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
@@ -27,7 +27,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 "Add the B-roll clips to V2, apply a cross dissolve between each, color correct them to match the A-roll, and export a 1080p ProRes."
 ```
 
-The AI handles the workflow through 297 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro, with explicit unsupported errors where Adobe only exposes a workflow through UXP or the Premiere UI.
+The AI handles the workflow through 301 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro, plus UXP sidecar routing for Text panel transcript operations.
 
 ---
 
@@ -65,6 +65,21 @@ npm run install-cep
 ```
 
 This symlinks the plugin into Premiere Pro's extensions folder and enables debug mode.
+
+### 2b. Load the optional UXP panel
+
+The CEP panel remains the MCP command bridge. A separate `uxp-panel/` can be
+loaded when you need Premiere Pro 25+ Text panel transcript APIs that CEP cannot
+call.
+
+```bash
+npm run install-uxp
+```
+
+Use `premiere-pro-mcp --install-uxp` when installed globally. This helper does
+not load the panel by itself. Adobe UXP Developer Tool must load UXP plugins
+manually: enable Developer Mode, click **Add Plugin**, select
+`uxp-panel/manifest.json`, then click **Load** or **Load & Watch**.
 
 <details>
 <summary>Manual installation (macOS)</summary>
@@ -179,7 +194,20 @@ Dry-run is the default. It does not import `dist/`, contact the CEP bridge,
 open Premiere, save, export, delete, enqueue AME jobs, or modify media. It
 prints the planned checks plus static contract labels for known high-risk
 areas: captions/transcript claims, in/out time units, Auto Reframe signature,
-text overlay styling, and frame-capture/export capability.
+text overlay styling, frame-capture/export capability, and local UXP transcript
+status.
+
+UXP transcript status is read from a local JSON status file only. By default the
+sweep checks `${PREMIERE_TEMP_DIR:-<os-temp>/premiere-mcp-bridge}/uxp-transcript-status.json`
+and reports `ONLINE`, `OFFLINE`, `STALE`, or `INVALID` without calling Premiere
+or Adobe UXP Developer Tool. This status-file hook is optional and offline-only;
+the bundled minimal UXP panel does not write the file automatically. Use MCP
+`get_uxp_bridge_status` for the live localhost sidecar state and `uxp_ping` for
+a panel round trip.
+
+```bash
+npm run diagnostics:sweep -- --dry-run --uxp-status-file /path/to/uxp-transcript-status.json
+```
 
 To run read-only live bridge/runtime checks against an already open Premiere
 project:
@@ -246,7 +274,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 ---
 
-## Tools (297)
+## Tools (301)
 
 ### Discovery & Inspection (10 + 10)
 
@@ -386,7 +414,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 Use real caption tools when you need editable Premiere caption/subtitle tracks from sidecar files. Use `add_text_overlay` or `add_caption_text_overlays` when you need visible styled bottom yellow text and can accept graphics overlays instead of real caption-track items. Target an empty upper video track for these overlays; the tools refuse occupied target ranges by default.
 
-### Workspace & Captions (2 + 13)
+### Workspace & Captions (2 + 14)
 
 | Tool | Description |
 |------|-------------|
@@ -398,7 +426,8 @@ Use real caption tools when you need editable Premiere caption/subtitle tracks f
 | `import_caption_file` | Import caption sidecar files |
 | `get_caption_api_capabilities` | Report caption API availability |
 | `create_caption_track` | Create caption/subtitle tracks |
-| `import_text_panel_transcript` / `export_text_panel_transcript` | Return explicit UXP-required unsupported errors under the CEP bridge |
+| `has_text_panel_transcript` | Check clip Text panel transcript state through the UXP sidecar bridge |
+| `import_text_panel_transcript` / `export_text_panel_transcript` | Import/export clip Text panel transcript JSON through the UXP sidecar bridge |
 | `create_captions_from_text_panel_transcript` | Return explicit UXP/UI-required unsupported errors under the CEP bridge |
 | `auto_transcribe_sequence` | Return explicit unsupported error; Speech-to-Text auto-transcribe is not public ExtendScript |
 
@@ -407,7 +436,7 @@ Use real caption tools when you need editable Premiere caption/subtitle tracks f
 Premiere has two separate surfaces here:
 
 - **CEP/ExtendScript sidecar captions:** this MCP bridge can import local caption sidecar files such as `.srt`, `.vtt`, `.scc`, `.mcc`, and `.stl` into the project, then call `Sequence.createCaptionTrack(projectItem, startTime, captionFormat)` when the active Premiere runtime exposes it. This path creates a sequence caption track from an imported caption ProjectItem, but it does not provide reliable Text panel transcript readback, caption style readback, or Speech-to-Text.
-- **UXP Text panel transcripts:** Premiere Pro 25+ exposes transcript operations in UXP through `Transcript.hasTranscript`, `Transcript.exportToJSON`, `Transcript.importFromJSON`, `TextSegments.importFromJSON`, `Transcript.createImportTextSegmentsAction`, and `Transcript.querySupportedLanguages`. This repository's bridge is CEP/ExtendScript, so it cannot call the UXP `premierepro` module from `CSInterface.evalScript()`. The Text panel import/export/create-caption tools therefore validate inputs where possible and then return a clear unsupported error instead of pretending to run.
+- **UXP Text panel transcripts:** Premiere Pro 25+ exposes transcript operations in UXP through `Transcript.hasTranscript`, `Transcript.exportToJSON`, `Transcript.importFromJSON`, `TextSegments.importFromJSON`, `Transcript.createImportTextSegmentsAction`, and `Transcript.querySupportedLanguages`. MCP exposes `uxp_ping`, `get_uxp_bridge_status`, `get_uxp_bridge_capabilities`, `has_text_panel_transcript`, `import_text_panel_transcript`, and `export_text_panel_transcript` through one MCP connector and a local sidecar command bridge. Start it with `PREMIERE_UXP_BRIDGE_ENABLED=true`; the UXP panel polls `GET /uxp/poll` and posts results to `POST /uxp/result`. The panel's manual bridge check uses `GET /uxp/status` so it cannot consume queued commands.
 - **Local transcript files:** the transcript JSON helpers use Adobe's public transcript schema shape (`language`, `speakers`, `segments`, timed `words`) so an external UXP panel or manual Text panel workflow can use those files.
 
 ### Scripting (6)
@@ -504,9 +533,10 @@ premiere-pro-mcp/
 ├── src/
 │   ├── index.ts                 # Entry point — stdio transport setup
 │   ├── http-server.ts           # Entry point — HTTP/SSE transport (Fly.io / remote)
-│   ├── server.ts                # MCP server — registers all 297 tools + 2 resources
+│   ├── server.ts                # MCP server — registers all 301 tools + 2 resources
 │   ├── bridge/
 │   │   ├── file-bridge.ts       # File-based IPC (write .jsx, poll .json)
+│   │   ├── uxp-bridge.ts        # Optional localhost UXP sidecar poll/result bridge
 │   │   └── script-builder.ts    # ExtendScript generator with ES3 helpers
 │   ├── tools/                   # 28 tool modules
 │   │   ├── discovery.ts         # Project discovery and queries
@@ -532,7 +562,7 @@ premiere-pro-mcp/
 │   │   ├── source-monitor.ts    # Source monitor control
 │   │   ├── track-targeting.ts   # Track targeting, motion, audio props
 │   │   ├── utility.ts           # Batch ops, analysis, navigation
-│   │   ├── health.ts            # Connectivity ping
+│   │   ├── health.ts            # CEP and UXP bridge diagnostics
 │   │   ├── workspace.ts         # Workspace layout switching
 │   │   ├── captions.ts          # Caption sidecars, transcript JSON helpers, and capability diagnostics
 │   │   ├── playback.ts          # Timeline/source playback control
@@ -545,8 +575,11 @@ premiere-pro-mcp/
 │   ├── main.js                  # Bridge polling and script execution
 │   ├── host.jsx                 # ExtendScript entry point
 │   └── CSInterface.js           # Adobe CEP interface library
+├── uxp-panel/                   # Optional Premiere UXP transcript sidecar panel
 ├── scripts/
-│   └── install-cep.sh           # CEP plugin installer (symlink + debug mode)
+│   ├── install-cep.sh           # CEP plugin installer (symlink + debug mode)
+│   ├── install-uxp.sh           # UDT loading helper for uxp-panel/manifest.json
+│   └── safe-runtime-sweep.mjs   # Safe CEP/UXP status diagnostics
 ├── Dockerfile                   # Multi-stage Docker build for Fly.io
 ├── fly.toml                     # Fly.io deployment config
 ├── RESEARCH.md                  # API research and implementation status
@@ -561,7 +594,7 @@ premiere-pro-mcp/
 
 ### Why CEP instead of UXP?
 
-CEP (Common Extensibility Platform) provides full ExtendScript access in Premiere Pro, including the undocumented **QE DOM** — which is the only way to apply effects by name, perform ripple deletes, and do advanced trim operations. UXP in Premiere Pro now exposes some newer surfaces, including Text panel transcript import/export, that CEP cannot call. This bridge reports those UXP-only paths explicitly instead of inflating CEP/ExtendScript support. CEP works across **Premiere Pro 2020–2025+**.
+CEP (Common Extensibility Platform) provides full ExtendScript access in Premiere Pro, including the undocumented **QE DOM** — which is the only way to apply effects by name, perform ripple deletes, and do advanced trim operations. UXP in Premiere Pro now exposes some newer surfaces, including Text panel transcript import/export, that CEP cannot call. This fork uses one MCP server with two panels when transcript work is needed: CEP for ExtendScript/QE tools, and a manually loaded `uxp-panel/` for UXP-only transcript commands. CEP works across **Premiere Pro 2020–2025+**.
 
 ### ExtendScript Compatibility
 

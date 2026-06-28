@@ -19,6 +19,27 @@ const mockedSendRawCommand = vi.mocked(sendRawCommand);
 
 const bridgeOptions: BridgeOptions = { tempDir: "/tmp/test-bridge", timeoutMs: 5000 };
 
+function makeMockUxpBridge(result: { success: boolean; data?: unknown; error?: string } = { success: true, data: {} }) {
+  return {
+    getStatus: vi.fn().mockReturnValue({
+      enabled: true,
+      running: true,
+      host: "127.0.0.1",
+      port: 17777,
+      url: "http://127.0.0.1:17777",
+      pollPath: "/uxp/poll",
+      resultPath: "/uxp/result",
+      pendingCommands: 0,
+      inFlightCommands: 0,
+      waitingPolls: 0,
+      panelOnline: true,
+      lastPollAt: "2026-06-28T00:00:00.000Z",
+      lastResultAt: null,
+    }),
+    sendCommand: vi.fn().mockResolvedValue(result),
+  };
+}
+
 // Import all tool modules
 import { getDiscoveryTools } from "../../src/tools/discovery.js";
 import { getProjectTools } from "../../src/tools/project.js";
@@ -86,9 +107,9 @@ const ALL_MODULES: Array<{
   { name: "source-monitor", getter: getSourceMonitorTools, minTools: 5 },
   { name: "track-targeting", getter: getTrackTargetingTools, minTools: 20 },
   { name: "utility", getter: getUtilityTools, minTools: 15 },
-  { name: "health", getter: getHealthTools, minTools: 4 },
+  { name: "health", getter: getHealthTools, minTools: 7 },
   { name: "workspace", getter: getWorkspaceTools, minTools: 2 },
-  { name: "captions", getter: getCaptionTools, minTools: 13 },
+  { name: "captions", getter: getCaptionTools, minTools: 14 },
   { name: "playback", getter: getPlaybackTools, minTools: 3 },
   { name: "project-manager", getter: getProjectManagerTools, minTools: 1 },
 ];
@@ -172,12 +193,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 297 tools", () => {
+  it("all modules together have 301 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(297);
+    expect(total).toBe(301);
   });
 
   it("there are 28 modules", () => {
@@ -219,11 +240,67 @@ describe("Tool Handler Behavior", () => {
           tempDir: "/tmp/test",
           timeoutMs: 5000,
         },
+        uxpBridge: {
+          enabled: false,
+          running: false,
+          panelOnline: false,
+        },
         requiresPremiere: false,
         requiresCepBridge: false,
       });
       expect(typeof (result.data as any).packageVersion).toBe("string");
       expect(Array.isArray((result.data as any).warnings)).toBe(true);
+    });
+
+    it("get_uxp_bridge_status reports canonical poll/result status without CEP bridge I/O", async () => {
+      const mockUxpBridge = makeMockUxpBridge();
+      const tools = getHealthTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+      const result = await (tools.get_uxp_bridge_status.handler as any)({});
+
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+      expect(mockUxpBridge.getStatus).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({
+        readOnly: true,
+        url: "http://127.0.0.1:17777",
+        pollPath: "/uxp/poll",
+        resultPath: "/uxp/result",
+        requiresCepBridge: false,
+        requiresUxpPanel: true,
+      });
+    });
+
+    it("uxp_ping routes through the supplied UXP bridge and returns offline errors honestly", async () => {
+      const mockUxpBridge = makeMockUxpBridge({
+        success: false,
+        error: "UXP command timed out after 20ms",
+      });
+      const tools = getHealthTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+      const result = await (tools.uxp_ping.handler as any)({});
+
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+      expect(mockUxpBridge.sendCommand).toHaveBeenCalledWith("ping", {}, undefined);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("UXP ping failed");
+      expect(result.error).toContain("uxp-panel/manifest.json");
+    });
+
+    it("get_uxp_bridge_capabilities asks the UXP panel for capability data", async () => {
+      const mockUxpBridge = makeMockUxpBridge({
+        success: true,
+        data: { transcript: { hasTranscript: true, exportToJSON: true } },
+      });
+      const tools = getHealthTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+      const result = await (tools.get_uxp_bridge_capabilities.handler as any)({});
+
+      expect(mockUxpBridge.sendCommand).toHaveBeenCalledWith("capabilities", {}, undefined);
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({
+        bridge: "UXP sidecar",
+        requiresCepBridge: false,
+        requiresUxpPanel: true,
+      });
+      expect((result.data as any).transcriptApis).toContain("Transcript.exportToJSON(clipProjectItem)");
     });
 
     it("calls sendCommand with shortened timeout", async () => {
@@ -794,6 +871,7 @@ describe("Tool Handler Behavior", () => {
       const toolNames = Object.keys(tools);
       expect(toolNames).toContain("create_caption_track");
       expect(toolNames).toContain("parse_transcript_json_file");
+      expect(toolNames).toContain("has_text_panel_transcript");
       expect(toolNames).toContain("import_text_panel_transcript");
 
       await (tools.create_caption_track.handler as any)({ item_id: "my-srt-file" });
@@ -971,8 +1049,9 @@ describe("Tool Handler Behavior", () => {
       }
     });
 
-    it("Text panel transcript import returns an explicit UXP/CEP unsupported error", async () => {
-      const tools = getCaptionTools(bridgeOptions);
+    it("Text panel transcript import validates local JSON and routes through the UXP bridge", async () => {
+      const mockUxpBridge = makeMockUxpBridge({ success: true, data: { imported: true } });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
       const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-unsupported-"));
       const transcriptPath = join(tempDir, "transcript.json");
 
@@ -1003,9 +1082,131 @@ describe("Tool Handler Behavior", () => {
         });
 
         expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(mockUxpBridge.sendCommand).toHaveBeenCalledTimes(1);
+        expect(mockUxpBridge.sendCommand.mock.calls[0][0]).toBe("textPanel.importTranscript");
+        expect(mockUxpBridge.sendCommand.mock.calls[0][1]).toMatchObject({
+          clipProjectItemId: "clip-1",
+          transcript: { language: "en-us" },
+        });
+        expect(result.success).toBe(true);
+        expect(result.data).toMatchObject({
+          imported: true,
+          clipProjectItemId: "clip-1",
+          requiresCepBridge: false,
+          requiresUxpPanel: true,
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("has_text_panel_transcript returns UXP offline errors without false success", async () => {
+      const mockUxpBridge = makeMockUxpBridge({
+        success: false,
+        error: "UXP command timed out after 20ms",
+      });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+
+      const result = await (tools.has_text_panel_transcript.handler as any)({
+        clip_project_item_id: "clip-1",
+      });
+
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+      expect(mockUxpBridge.sendCommand).toHaveBeenCalledWith("textPanel.hasTranscript", {
+        clipProjectItemId: "clip-1",
+      }, undefined);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Text panel transcript check failed");
+    });
+
+    it("has_text_panel_transcript requires a boolean UXP transcript result", async () => {
+      const mockUxpBridge = makeMockUxpBridge({ success: true, data: { status: "unknown" } });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+
+      const result = await (tools.has_text_panel_transcript.handler as any)({
+        clip_project_item_id: "clip-1",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("did not include a boolean hasTranscript value");
+    });
+
+    it("has_text_panel_transcript reports false when the UXP panel explicitly returns false", async () => {
+      const mockUxpBridge = makeMockUxpBridge({ success: true, data: { hasTranscript: false } });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+
+      const result = await (tools.has_text_panel_transcript.handler as any)({
+        clip_project_item_id: "clip-1",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data).toMatchObject({
+        clipProjectItemId: "clip-1",
+        hasTranscript: false,
+      });
+    });
+
+    it("export_text_panel_transcript refuses success without valid transcript JSON", async () => {
+      const mockUxpBridge = makeMockUxpBridge({ success: true, data: { hasTranscript: true } });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-export-invalid-"));
+      const transcriptPath = join(tempDir, "export.json");
+
+      try {
+        const result = await (tools.export_text_panel_transcript.handler as any)({
+          clip_project_item_id: "clip-1",
+          output_path: transcriptPath,
+        });
+
         expect(result.success).toBe(false);
-        expect(result.error).toContain("CEP/ExtendScript bridge");
-        expect(result.error).toContain("Transcript.importFromJSON");
+        expect(result.error).toContain("did not include valid Adobe transcript JSON");
+        expect(existsSync(transcriptPath)).toBe(false);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("export_text_panel_transcript writes validated transcript JSON returned by UXP", async () => {
+      const mockUxpBridge = makeMockUxpBridge({
+        success: true,
+        data: {
+          transcript: {
+            language: "en-us",
+            speakers: [{ id: "00000000-0000-4000-8000-000000000001", name: "Speaker 1" }],
+            segments: [
+              {
+                duration: 1,
+                language: "en-us",
+                speaker: "00000000-0000-4000-8000-000000000001",
+                start: 0,
+                words: [
+                  { confidence: 1, duration: 1, eos: true, start: 0, tags: [], text: "Hello", type: "word" },
+                ],
+              },
+            ],
+          },
+        },
+      });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-export-"));
+      const transcriptPath = join(tempDir, "export.json");
+
+      try {
+        const result = await (tools.export_text_panel_transcript.handler as any)({
+          clip_project_item_id: "clip-1",
+          output_path: transcriptPath,
+        });
+
+        expect(mockUxpBridge.sendCommand).toHaveBeenCalledWith("textPanel.exportTranscript", {
+          clipProjectItemId: "clip-1",
+        }, undefined);
+        expect(result.success).toBe(true);
+        expect(result.data).toMatchObject({
+          exported: true,
+          outputPath: transcriptPath,
+          segmentCount: 1,
+        });
+        expect(JSON.parse(readFileSync(transcriptPath, "utf-8")).language).toBe("en-us");
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }
@@ -1014,13 +1215,18 @@ describe("Tool Handler Behavior", () => {
     it("get_caption_api_capabilities reports UXP transcript APIs but marks CEP as unable to invoke them", async () => {
       const tools = getCaptionTools(bridgeOptions);
 
-      await (tools.get_caption_api_capabilities.handler as any)({});
+      const result = await (tools.get_caption_api_capabilities.handler as any)({});
       const script = mockedSendCommand.mock.calls[0][0];
 
       expect(script).toContain("canExecuteUxpPremiereProModule");
       expect(script).toContain("Transcript.exportToJSON");
       expect(script).toContain("currentBridgeCanInvokeUxpApis");
       expect(script).toContain("createCaptionTrack");
+      expect(result.data.uxpSidecarBridge).toMatchObject({
+        enabled: false,
+        running: false,
+        currentBridgeCanInvokeUxpApis: false,
+      });
     });
   });
 

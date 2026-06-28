@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createServer } from "./server.js";
 import { cleanupTempDir, getTempDir } from "./bridge/file-bridge.js";
+import { UxpBridge } from "./bridge/uxp-bridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LANDING_DIR = path.resolve(__dirname, "../landing-dist");
@@ -69,17 +70,41 @@ function serveLanding(req: http.IncomingMessage, res: http.ServerResponse): bool
 const PORT = parseInt(process.env.PORT ?? "3000", 10);
 const AUTH_TOKEN = process.env.MCP_AUTH_TOKEN;
 
+function envFlag(name: string): boolean {
+  const value = process.env[name]?.toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function envPositiveInt(name: string): number | undefined {
+  const value = process.env[name];
+  if (!value) return undefined;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 const bridgeOptions = {
   tempDir: process.env.PREMIERE_TEMP_DIR,
-  timeoutMs: process.env.PREMIERE_TIMEOUT_MS
-    ? parseInt(process.env.PREMIERE_TIMEOUT_MS, 10)
-    : undefined,
+  timeoutMs: envPositiveInt("PREMIERE_TIMEOUT_MS"),
 };
 
 const tempDir = getTempDir(bridgeOptions);
 console.error(`[premiere-pro-mcp] Starting HTTP server on port ${PORT}...`);
 console.error(`[premiere-pro-mcp] Temp directory: ${tempDir}`);
 cleanupTempDir(bridgeOptions);
+
+const uxpBridge = new UxpBridge({
+  enabled: envFlag("PREMIERE_UXP_BRIDGE_ENABLED"),
+  host: process.env.PREMIERE_UXP_BRIDGE_HOST,
+  port: envPositiveInt("PREMIERE_UXP_BRIDGE_PORT"),
+  pollTimeoutMs: envPositiveInt("PREMIERE_UXP_POLL_TIMEOUT_MS"),
+  commandTimeoutMs: envPositiveInt("PREMIERE_UXP_COMMAND_TIMEOUT_MS"),
+});
+const uxpStatus = await uxpBridge.start();
+if (uxpStatus.running) {
+  console.error(`[premiere-pro-mcp] UXP bridge listening at ${uxpStatus.url}`);
+} else {
+  console.error("[premiere-pro-mcp] UXP bridge disabled");
+}
 
 // Each request gets its own transport+server instance (stateless per-request model)
 const httpServer = http.createServer(async (req, res) => {
@@ -109,7 +134,7 @@ const httpServer = http.createServer(async (req, res) => {
     }
   }
 
-  const mcpServer = createServer(bridgeOptions);
+  const mcpServer = createServer(bridgeOptions, { uxpBridge });
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined, // stateless
   });
@@ -143,10 +168,14 @@ httpServer.listen(PORT, "0.0.0.0", () => {
 
 process.on("SIGTERM", () => {
   console.error("[premiere-pro-mcp] SIGTERM received, shutting down...");
-  httpServer.close(() => process.exit(0));
+  httpServer.close(() => {
+    uxpBridge.shutdown().then(() => process.exit(0), () => process.exit(1));
+  });
 });
 
 process.on("SIGINT", () => {
   console.error("[premiere-pro-mcp] SIGINT received, shutting down...");
-  httpServer.close(() => process.exit(0));
+  httpServer.close(() => {
+    uxpBridge.shutdown().then(() => process.exit(0), () => process.exit(1));
+  });
 });
