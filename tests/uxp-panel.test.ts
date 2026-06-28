@@ -27,6 +27,17 @@ describe("UXP panel static contracts", () => {
     expect(manifest.requiredPermissions.network.domains).toBe("all");
   });
 
+  it("resolveClip matches a clip by name and falls back to Project panel selection", () => {
+    const source = readFileSync(PANEL_MAIN, "utf-8");
+
+    // The MCP tools only populate the id slot, so the supplied value (a name or
+    // CEP node ID) must also be matched against the clip name; UXP getId()
+    // returns a GUID that never matches a name or node ID.
+    expect(source).toContain("name === String(targetId)");
+    // It must no longer hard-throw before trying the Project panel selection.
+    expect(source).toContain("no clip is selected in the Project panel");
+  });
+
   it("documents MCP bridge status separately from optional diagnostics status files", () => {
     const readme = readFileSync(PANEL_README, "utf-8");
 

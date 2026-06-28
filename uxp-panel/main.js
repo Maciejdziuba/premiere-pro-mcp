@@ -176,14 +176,23 @@
       var allClips = await walkProjectItems(project);
       for (var i = 0; i < allClips.length; i++) {
         var id = await itemId(allClips[i]);
-        if (targetId && id === String(targetId)) return { project: project, clip: allClips[i], selected: false };
-        if (targetName && allClips[i].name === String(targetName)) return { project: project, clip: allClips[i], selected: false };
+        var name = allClips[i].name;
+        if (targetId && id !== null && id === String(targetId)) return { project: project, clip: allClips[i], selected: false };
+        // The MCP tools only populate the id slot, but callers pass a clip name
+        // or CEP node ID there. UXP getId() returns a GUID that never matches
+        // those, so also match the supplied value against the clip name.
+        if (targetId && name === String(targetId)) return { project: project, clip: allClips[i], selected: false };
+        if (targetName && name === String(targetName)) return { project: project, clip: allClips[i], selected: false };
       }
-      throw new Error("No clip project item matched the requested name or ID");
+      // No id/name match in the project walk. Fall through to the Project panel
+      // selection so a user-selected clip still resolves.
     }
 
     var selected = await selectedClipItems(project);
     if (selected.length === 0) {
+      if (targetName || targetId) {
+        throw new Error("No clip matched '" + (targetName || targetId) + "' by ID or name, and no clip is selected in the Project panel");
+      }
       throw new Error("Select a clip project item or pass clipName/clipProjectItemId");
     }
     return { project: project, clip: selected[0], selected: true, selectedCount: selected.length };

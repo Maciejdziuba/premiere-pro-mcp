@@ -53,6 +53,14 @@ also target a named clip with `clipName` or a project item ID with
 the command payload as `transcriptJson`, `transcript_json`, `transcript`, or
 `json`.
 
+The MCP transcript tools (`has_text_panel_transcript`,
+`export_text_panel_transcript`, `import_text_panel_transcript`) send the
+`clip_project_item_id` value in the `clipProjectItemId` slot. UXP `getId()`
+returns a GUID that does not match CEP node IDs or clip names, so the panel also
+matches that value against the clip **name**, and falls back to the current
+Project panel **selection** when nothing matches. In practice: pass the clip
+name, or select the clip in the Project panel before calling the tool.
+
 `npm run diagnostics:sweep -- --dry-run` can optionally read a local
 `uxp-transcript-status.json` file, but this minimal panel does not write that
 file. Missing status-file output is an offline diagnostics label, not proof that
