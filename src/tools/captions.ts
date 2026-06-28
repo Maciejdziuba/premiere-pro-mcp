@@ -178,6 +178,13 @@ function requireString(value: unknown, path: string): string {
   return value;
 }
 
+function requireTextString(value: unknown, path: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${path} must be a string`);
+  }
+  return value;
+}
+
 function validateLanguageCode(value: unknown, path: string): string {
   const language = requireString(value, path).toLowerCase();
   if (!SUPPORTED_TRANSCRIPT_LANGUAGES.includes(language)) {
@@ -263,7 +270,7 @@ function normalizeTranscriptJson(value: unknown): AdobeTranscript {
         eos: typeof word.eos === "boolean" ? word.eos : false,
         start: requireNumber(word.start, `transcript.segments[${segmentIndex}].words[${wordIndex}].start`),
         tags,
-        text: requireString(word.text, `transcript.segments[${segmentIndex}].words[${wordIndex}].text`),
+        text: requireTextString(word.text, `transcript.segments[${segmentIndex}].words[${wordIndex}].text`),
         type: wordType,
       };
     });
@@ -382,7 +389,8 @@ function unsupportedTextPanelResult(operation: string) {
     error:
       `${operation} is not available through this MCP server's CEP/ExtendScript bridge. ` +
       "Premiere Pro 25+ exposes Text panel transcript import/export through UXP " +
-      "(`premierepro`.Transcript.importFromJSON/exportToJSON/createImportTextSegmentsAction), " +
+      "(`premierepro`.Transcript.exportToJSON/importFromJSON/createImportTextSegmentsAction, " +
+      "with `premierepro`.Transcript.hasTranscript optional in Premiere 26.2), " +
       "but CEP evalScript cannot call UXP modules and Adobe has not exposed Speech-to-Text auto-transcribe " +
       "or Text panel transcript import/export in ExtendScript.",
   };
@@ -393,6 +401,73 @@ function extractObjectData(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function objectHasKeys(value: Record<string, unknown>): boolean {
+  return Object.keys(value).length > 0;
+}
+
+function buildUxpDiagnosticData(
+  value: unknown,
+  context: Record<string, unknown> = {}
+): Record<string, unknown> {
+  const diagnostic = extractObjectData(value);
+  const capabilities = extractObjectData(diagnostic.runtimeTranscriptCapabilities);
+  const data: Record<string, unknown> = {
+    ...context,
+    requiresPremiere: true,
+    requiresCepBridge: false,
+    requiresUxpPanel: true,
+  };
+
+  if (objectHasKeys(diagnostic)) {
+    data.uxpDiagnostic = diagnostic;
+  }
+  if (Array.isArray(diagnostic.missingMethods)) {
+    data.missingMethods = diagnostic.missingMethods;
+  }
+  if (objectHasKeys(capabilities)) {
+    data.runtimeTranscriptCapabilities = capabilities;
+  }
+
+  return data;
+}
+
+function describeValueShape(value: unknown, depth = 0): unknown {
+  if (value === null) return { type: "null" };
+  if (value === undefined) return { type: "undefined" };
+  if (typeof value === "string") {
+    return {
+      type: "string",
+      length: value.length,
+      prefix: value.slice(0, 240),
+    };
+  }
+  if (typeof value !== "object") {
+    return { type: typeof value, value };
+  }
+  if (Array.isArray(value)) {
+    return {
+      type: "array",
+      length: value.length,
+      first: depth < 3 && value.length > 0 ? describeValueShape(value[0], depth + 1) : undefined,
+    };
+  }
+
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).slice(0, 40);
+  const sample: Record<string, unknown> = {};
+  if (depth < 2) {
+    for (const key of keys.slice(0, 10)) {
+      sample[key] = describeValueShape(record[key], depth + 1);
+    }
+  }
+
+  return {
+    type: "object",
+    keys,
+    sample,
+  };
+}
+
 function extractHasTranscript(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
   const data = extractObjectData(value);
@@ -401,16 +476,33 @@ function extractHasTranscript(value: unknown): boolean | null {
   return null;
 }
 
-function extractTranscript(value: unknown): AdobeTranscript | null {
+function transcriptCandidate(value: unknown): unknown {
   const data = extractObjectData(value);
-  const candidate = data.transcript ?? data.transcriptJson ?? data.transcript_json ?? value;
+  return data.transcript ?? data.transcriptJson ?? data.transcript_json ?? value;
+}
+
+function parseTranscriptCandidate(value: unknown): unknown {
+  const candidate = transcriptCandidate(value);
+  if (typeof candidate === "string") {
+    return JSON.parse(candidate);
+  }
+  return candidate;
+}
+
+function extractTranscript(value: unknown): AdobeTranscript | null {
   try {
-    if (typeof candidate === "string") {
-      return normalizeTranscriptJson(JSON.parse(candidate));
-    }
-    return normalizeTranscriptJson(candidate);
+    return normalizeTranscriptJson(parseTranscriptCandidate(value));
   } catch {
     return null;
+  }
+}
+
+function transcriptValidationError(value: unknown): string | null {
+  try {
+    normalizeTranscriptJson(parseTranscriptCandidate(value));
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
   }
 }
 
@@ -851,11 +943,12 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
               extendScriptImportExport: false,
               extendScriptAutoTranscribe: false,
               uxpPremiere25PlusApis: [
-                "Transcript.hasTranscript(clipProjectItem)",
                 "Transcript.exportToJSON(clipProjectItem)",
                 "Transcript.importFromJSON(json)",
+                "TextSegments.importFromJSON(json, callback) [alternate callback API, not used by MCP import]",
                 "Transcript.createImportTextSegmentsAction(textSegments, clipProjectItem)",
-                "Transcript.querySupportedLanguages()"
+                "Transcript.querySupportedLanguages()",
+                "Transcript.hasTranscript(clipProjectItem) [optional; exportToJSON is the required export path]"
               ],
               currentBridgeCanInvokeUxpApis: false
             },
@@ -912,6 +1005,10 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
           return {
             success: false,
             error: uxpTranscriptError("Text panel transcript check", result.error),
+            data: buildUxpDiagnosticData(result.data, {
+              clipProjectItemId: args.clip_project_item_id,
+              operation: "has_text_panel_transcript",
+            }),
           };
         }
 
@@ -924,12 +1021,16 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
               "Expected result data like { hasTranscript: true|false }; refusing to claim transcript state.",
           };
         }
+        const uxpData = extractObjectData(result.data);
 
         return {
           success: true,
           data: {
             clipProjectItemId: args.clip_project_item_id,
             hasTranscript,
+            methodUsed: typeof uxpData.methodUsed === "string" ? uxpData.methodUsed : null,
+            exportProbe: uxpData.exportProbe ?? null,
+            runtimeTranscriptCapabilities: uxpData.runtimeTranscriptCapabilities ?? null,
             requiresPremiere: true,
             requiresCepBridge: false,
             requiresUxpPanel: true,
@@ -974,9 +1075,15 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
           return {
             success: false,
             error: uxpTranscriptError("Text panel transcript import", result.error),
+            data: buildUxpDiagnosticData(result.data, {
+              clipProjectItemId: args.clip_project_item_id,
+              transcriptPath: args.transcript_path,
+              operation: "import_text_panel_transcript",
+            }),
           };
         }
 
+        const uxpData = extractObjectData(result.data);
         return {
           success: true,
           data: {
@@ -985,6 +1092,7 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
             transcriptPath: args.transcript_path,
             ...summarizeTranscript(transcript),
             uxpResult: result.data ?? null,
+            runtimeTranscriptCapabilities: uxpData.runtimeTranscriptCapabilities ?? null,
             requiresPremiere: true,
             requiresCepBridge: false,
             requiresUxpPanel: true,
@@ -1029,18 +1137,39 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
           return {
             success: false,
             error: uxpTranscriptError("Text panel transcript export", result.error),
+            data: buildUxpDiagnosticData(result.data, {
+              clipProjectItemId: args.clip_project_item_id,
+              outputPath: args.output_path,
+              operation: "export_text_panel_transcript",
+            }),
           };
         }
 
         const transcript = extractTranscript(result.data);
         if (!transcript) {
+          const uxpData = extractObjectData(result.data);
           return {
             success: false,
             error:
               "UXP bridge returned success but did not include valid Adobe transcript JSON. " +
               "Expected result data like { transcript: { language, speakers, segments } }; refusing to write a false transcript export.",
+            data: {
+              ...buildUxpDiagnosticData(
+                { runtimeTranscriptCapabilities: uxpData.runtimeTranscriptCapabilities },
+                {
+                  clipProjectItemId: args.clip_project_item_id,
+                  outputPath: args.output_path,
+                  operation: "export_text_panel_transcript",
+                }
+              ),
+              methodUsed: typeof uxpData.methodUsed === "string" ? uxpData.methodUsed : null,
+              validationError: transcriptValidationError(result.data),
+              uxpResultShape: describeValueShape(result.data),
+              transcriptCandidateShape: describeValueShape(transcriptCandidate(result.data)),
+            },
           };
         }
+        const uxpData = extractObjectData(result.data);
 
         writeFileSync(args.output_path, JSON.stringify(transcript, null, 2) + "\n", "utf-8");
         return {
@@ -1050,6 +1179,8 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
             clipProjectItemId: args.clip_project_item_id,
             outputPath: args.output_path,
             ...summarizeTranscript(transcript),
+            methodUsed: typeof uxpData.methodUsed === "string" ? uxpData.methodUsed : null,
+            runtimeTranscriptCapabilities: uxpData.runtimeTranscriptCapabilities ?? null,
             requiresPremiere: true,
             requiresCepBridge: false,
             requiresUxpPanel: true,

@@ -61,6 +61,15 @@ matches that value against the clip **name**, and falls back to the current
 Project panel **selection** when nothing matches. In practice: pass the clip
 name, or select the clip in the Project panel before calling the tool.
 
+Premiere 26.2 may expose `Transcript.exportToJSON` without exposing
+`Transcript.hasTranscript`. The export command therefore calls
+`Transcript.exportToJSON` directly. The has-transcript command uses
+`Transcript.hasTranscript` when present, otherwise it derives `true` only from a
+successful `exportToJSON` probe and reports `unknown` as a structured diagnostic
+if the fallback export fails. The `capabilities`, `ping`, and failed transcript
+commands include `runtimeTranscriptCapabilities` with the actual method types
+seen in the loaded Premiere runtime.
+
 `npm run diagnostics:sweep -- --dry-run` can optionally read a local
 `uxp-transcript-status.json` file, but this minimal panel does not write that
 file. Missing status-file output is an offline diagnostics label, not proof that

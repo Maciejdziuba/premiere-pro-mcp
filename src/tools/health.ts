@@ -114,6 +114,11 @@ function inspectBridgeDirectory(tempDir: string) {
   };
 }
 
+function extractObjectData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
 export interface HealthToolOptions {
   uxpBridge?: UxpBridge;
 }
@@ -259,13 +264,16 @@ export function getHealthTools(bridgeOptions: BridgeOptions, options: HealthTool
           data: {
             bridge: "UXP sidecar",
             capabilities: result.data ?? {},
-            transcriptApis: [
-              "Transcript.hasTranscript(clipProjectItem)",
+            knownPublicTranscriptApis: [
               "Transcript.exportToJSON(clipProjectItem)",
               "Transcript.importFromJSON(json)",
+              "TextSegments.importFromJSON(json, callback) [alternate callback API, not used by MCP import]",
               "Transcript.createImportTextSegmentsAction(textSegments, clipProjectItem)",
               "Transcript.querySupportedLanguages()",
+              "Transcript.hasTranscript(clipProjectItem) [optional in Premiere 26.2]",
             ],
+            runtimeTranscriptCapabilities:
+              extractObjectData(result.data).runtimeTranscriptCapabilities ?? null,
             requiresPremiere: true,
             requiresCepBridge: false,
             requiresUxpPanel: true,

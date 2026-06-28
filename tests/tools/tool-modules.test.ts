@@ -288,7 +288,12 @@ describe("Tool Handler Behavior", () => {
     it("get_uxp_bridge_capabilities asks the UXP panel for capability data", async () => {
       const mockUxpBridge = makeMockUxpBridge({
         success: true,
-        data: { transcript: { hasTranscript: true, exportToJSON: true } },
+        data: {
+          runtimeTranscriptCapabilities: {
+            canExportTranscript: true,
+            transcriptMethods: { exportToJSON: "function", hasTranscript: "undefined" },
+          },
+        },
       });
       const tools = getHealthTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
       const result = await (tools.get_uxp_bridge_capabilities.handler as any)({});
@@ -300,7 +305,10 @@ describe("Tool Handler Behavior", () => {
         requiresCepBridge: false,
         requiresUxpPanel: true,
       });
-      expect((result.data as any).transcriptApis).toContain("Transcript.exportToJSON(clipProjectItem)");
+      expect((result.data as any).knownPublicTranscriptApis).toContain("Transcript.exportToJSON(clipProjectItem)");
+      expect((result.data as any).runtimeTranscriptCapabilities).toMatchObject({
+        canExportTranscript: true,
+      });
     });
 
     it("calls sendCommand with shortened timeout", async () => {
@@ -947,11 +955,20 @@ describe("Tool Handler Behavior", () => {
                 words: [
                   {
                     confidence: 1,
-                    duration: 1.25,
-                    eos: true,
+                    duration: 0.6,
+                    eos: false,
                     start: 0,
                     tags: [],
                     text: "Hello",
+                    type: "word",
+                  },
+                  {
+                    confidence: 1,
+                    duration: 0.05,
+                    eos: false,
+                    start: 0.6,
+                    tags: ["disfluency"],
+                    text: "",
                     type: "word",
                   },
                 ],
@@ -970,7 +987,7 @@ describe("Tool Handler Behavior", () => {
         expect(result.data).toMatchObject({
           language: "en-us",
           segmentCount: 1,
-          wordCount: 1,
+          wordCount: 2,
           speakerCount: 1,
           requiresPremiere: false,
         });
@@ -1117,6 +1134,11 @@ describe("Tool Handler Behavior", () => {
       }, undefined);
       expect(result.success).toBe(false);
       expect(result.error).toContain("Text panel transcript check failed");
+      expect(result.data).toMatchObject({
+        clipProjectItemId: "clip-1",
+        operation: "has_text_panel_transcript",
+        requiresUxpPanel: true,
+      });
     });
 
     it("has_text_panel_transcript requires a boolean UXP transcript result", async () => {
@@ -1147,7 +1169,25 @@ describe("Tool Handler Behavior", () => {
     });
 
     it("export_text_panel_transcript refuses success without valid transcript JSON", async () => {
-      const mockUxpBridge = makeMockUxpBridge({ success: true, data: { hasTranscript: true } });
+      const mockUxpBridge = makeMockUxpBridge({
+        success: true,
+        data: {
+          methodUsed: "premierepro.Transcript.exportToJSON",
+          runtimeTranscriptCapabilities: {
+            canExportTranscript: true,
+            transcriptMethods: { exportToJSON: "function", hasTranscript: "undefined" },
+          },
+          transcript: {
+            schemaVersion: 1,
+            monologues: [
+              {
+                speaker: 0,
+                elements: [{ value: "hello", ts: 0, end_ts: 0.5 }],
+              },
+            ],
+          },
+        },
+      });
       const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
       const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-export-invalid-"));
       const transcriptPath = join(tempDir, "export.json");
@@ -1160,6 +1200,74 @@ describe("Tool Handler Behavior", () => {
 
         expect(result.success).toBe(false);
         expect(result.error).toContain("did not include valid Adobe transcript JSON");
+        expect(result.data).toMatchObject({
+          clipProjectItemId: "clip-1",
+          outputPath: transcriptPath,
+          operation: "export_text_panel_transcript",
+          methodUsed: "premierepro.Transcript.exportToJSON",
+          validationError: expect.stringContaining("transcript.language"),
+          runtimeTranscriptCapabilities: {
+            canExportTranscript: true,
+          },
+          uxpResultShape: {
+            type: "object",
+            keys: expect.arrayContaining(["methodUsed", "runtimeTranscriptCapabilities", "transcript"]),
+          },
+          transcriptCandidateShape: {
+            type: "object",
+            keys: expect.arrayContaining(["schemaVersion", "monologues"]),
+          },
+        });
+        expect(existsSync(transcriptPath)).toBe(false);
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("export_text_panel_transcript returns structured UXP missing-method diagnostics without writing", async () => {
+      const mockUxpBridge = makeMockUxpBridge({
+        success: false,
+        error: "export_transcript_json cannot run because the Premiere UXP runtime is missing: premierepro.Transcript.exportToJSON",
+        data: {
+          operation: "export_transcript_json",
+          missingMethods: ["premierepro.Transcript.exportToJSON"],
+          runtimeTranscriptCapabilities: {
+            hasPremiereProModule: true,
+            hasTranscriptNamespace: true,
+            transcriptMethods: {
+              hasTranscript: "undefined",
+              exportToJSON: "undefined",
+            },
+            missingMethods: {
+              exportTranscript: ["premierepro.Transcript.exportToJSON"],
+              directHasTranscript: ["premierepro.Transcript.hasTranscript"],
+            },
+          },
+        },
+      });
+      const tools = getCaptionTools(bridgeOptions, { uxpBridge: mockUxpBridge as any });
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-export-missing-api-"));
+      const transcriptPath = join(tempDir, "export.json");
+
+      try {
+        const result = await (tools.export_text_panel_transcript.handler as any)({
+          clip_project_item_id: "IMG_4216.MOV",
+          output_path: transcriptPath,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Text panel transcript export failed");
+        expect(result.data).toMatchObject({
+          clipProjectItemId: "IMG_4216.MOV",
+          outputPath: transcriptPath,
+          operation: "export_text_panel_transcript",
+          missingMethods: ["premierepro.Transcript.exportToJSON"],
+          runtimeTranscriptCapabilities: {
+            transcriptMethods: {
+              exportToJSON: "undefined",
+            },
+          },
+        });
         expect(existsSync(transcriptPath)).toBe(false);
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
@@ -1170,6 +1278,11 @@ describe("Tool Handler Behavior", () => {
       const mockUxpBridge = makeMockUxpBridge({
         success: true,
         data: {
+          methodUsed: "premierepro.Transcript.exportToJSON",
+          runtimeTranscriptCapabilities: {
+            canExportTranscript: true,
+            transcriptMethods: { exportToJSON: "function", hasTranscript: "undefined" },
+          },
           transcript: {
             language: "en-us",
             speakers: [{ id: "00000000-0000-4000-8000-000000000001", name: "Speaker 1" }],
@@ -1205,6 +1318,10 @@ describe("Tool Handler Behavior", () => {
           exported: true,
           outputPath: transcriptPath,
           segmentCount: 1,
+          methodUsed: "premierepro.Transcript.exportToJSON",
+          runtimeTranscriptCapabilities: {
+            canExportTranscript: true,
+          },
         });
         expect(JSON.parse(readFileSync(transcriptPath, "utf-8")).language).toBe("en-us");
       } finally {

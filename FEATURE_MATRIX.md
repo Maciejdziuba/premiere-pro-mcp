@@ -15,12 +15,12 @@ Current source of truth:
 |---|---:|---|---|---|
 | `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching color/effect/export helpers. |
 | `src/tools/audio.ts` | 10 | Dedicated audio levels/gain, fades, pan, keyframes, common effects, audio transitions, diagnostics, ducking, mute | E | Uses shared helper lookup for Volume/Level, QE helpers for audio effects/transitions, and honest errors for unsupported raw peak/normalization APIs. |
-| `src/tools/captions.ts` | 14 | Caption sidecars, Adobe transcript JSON helpers, capability diagnostics, and UXP sidecar Text panel transcript tools | F | Local SRT/transcript JSON parse/write/convert does not require Premiere; CEP can import sidecar caption files and may create caption tracks with `Sequence.createCaptionTrack`; Text panel transcript has/import/export route through the UXP sidecar bridge and return clear offline errors if the panel is not polling. |
+| `src/tools/captions.ts` | 14 | Caption sidecars, Adobe transcript JSON helpers, capability diagnostics, and UXP sidecar Text panel transcript tools | F | Local SRT/transcript JSON parse/write/convert does not require Premiere; CEP can import sidecar caption files and may create caption tracks with `Sequence.createCaptionTrack`; Text panel transcript has/import/export route through the UXP sidecar bridge and return clear offline/runtime diagnostics if the panel is not polling or required UXP methods are missing. |
 | `src/tools/clipboard.ts` | 8 | Effect copy, Lumetri grade copy/paste, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Lumetri grade tools use helper lookup; generic effect copy still needs broader migration. |
 | `src/tools/discovery.ts` | 10 | Project, item, sequence, clip discovery | G | Read-oriented foundation for safe planning. |
 | `src/tools/effects.ts` | 9 | Video/audio effects, fuller Lumetri controls, LUT, batch color, stabilization | F, with D owning Lumetri/color | Highest D/F overlap; optional Lumetri Creative/Vignette controls need live validation. |
 | `src/tools/export.ts` | 16 | Export, frame capture, interchange, AME/proxy operations, export diagnostics, batch export helpers | F | Queue details remain limited by AME/Premiere scripting APIs; frame capture now reports Sequence/QE capability and returns unsupported when no safe API is present. |
-| `src/tools/health.ts` | 7 | Fork ping, bridge diagnostics, UXP sidecar status/ping/capabilities, live health/runtime diagnostics | G | `fork_ping`, `bridge_diagnostics`, and `get_uxp_bridge_status` do not contact Premiere; `uxp_ping`/`get_uxp_bridge_capabilities` require the UXP panel; `ping` and runtime diagnostics use CEP. |
+| `src/tools/health.ts` | 7 | Fork ping, bridge diagnostics, UXP sidecar status/ping/capabilities, live health/runtime diagnostics | G | `fork_ping`, `bridge_diagnostics`, and `get_uxp_bridge_status` do not contact Premiere; `uxp_ping`/`get_uxp_bridge_capabilities` require the UXP panel and report live UXP transcript method types when loaded; `ping` and runtime diagnostics use CEP. |
 | `src/tools/inspection.ts` | 10 | Deep read-only project/sequence/clip reports | G | Used by safe runtime sweep. |
 | `src/tools/keyframes.ts` | 8 | Effect property and keyframe CRUD | D, with B helper dependency | Property lookup should migrate to shared helpers. |
 | `src/tools/markers.ts` | 4 | Sequence and clip markers | C/G | Editing behavior is C; reporting is G. |
@@ -65,7 +65,7 @@ Current reliable paths:
 - CEP/ExtendScript sidecar import: import `.srt`, `.vtt`, `.scc`, `.mcc`, and `.stl` files into the project.
 - Caption track creation: call `Sequence.createCaptionTrack(projectItem, startTime, captionFormat)` only when the live ExtendScript runtime exposes it and an imported caption ProjectItem is supplied.
 - Capability diagnostics: report CEP/ExtendScript caption capability plus UXP sidecar poll/result status.
-- UXP Text panel transcript tools: `has_text_panel_transcript`, `import_text_panel_transcript`, and `export_text_panel_transcript` route through `sendUxpCommand()`; the UXP panel polls `GET /uxp/poll` and posts results to `POST /uxp/result`.
+- UXP Text panel transcript tools: `has_text_panel_transcript`, `import_text_panel_transcript`, and `export_text_panel_transcript` route through `sendUxpCommand()`; the UXP panel polls `GET /uxp/poll` and posts results to `POST /uxp/result`. Premiere 26.2 can expose `Transcript.exportToJSON` without `Transcript.hasTranscript`, so export calls `exportToJSON` directly and `has_text_panel_transcript` treats direct `hasTranscript` as optional.
 
 Unsupported from this bridge:
 
@@ -92,7 +92,7 @@ Static/runtime-safe diagnostics now cover:
 - `fork_ping`: fork metadata without Premiere or CEP.
 - `bridge_diagnostics`: package version, Node runtime, effective bridge temp directory, timeout, pending `cmd_`/`res_` files, and warnings without contacting Premiere.
 - `get_uxp_bridge_status`: local UXP sidecar poll/result listener status without contacting Premiere.
-- `uxp_ping` and `get_uxp_bridge_capabilities`: UXP sidecar panel checks with clear offline/install instructions when the panel is not polling.
+- `uxp_ping` and `get_uxp_bridge_capabilities`: UXP sidecar panel checks with clear offline/install instructions when the panel is not polling, plus `runtimeTranscriptCapabilities` naming actual `premierepro.Transcript`/`TextSegments` method types when the panel is loaded.
 - `ping`: live CEP/Premiere connectivity plus Premiere version/build, ExtendScript locale/OS, project, active sequence, and QE availability readout.
 - `get_premiere_runtime_diagnostics`: read-only live runtime details for version/locale validation, BridgeTalk identifiers, project/sequence state, and capability probes without enabling QE.
 - `npm run validate:tools`: built catalog validation for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema metadata.

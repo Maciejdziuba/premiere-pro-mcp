@@ -38,6 +38,20 @@ describe("UXP panel static contracts", () => {
     expect(source).toContain("no clip is selected in the Project panel");
   });
 
+  it("reports runtime transcript capabilities and treats hasTranscript as optional", () => {
+    const source = readFileSync(PANEL_MAIN, "utf-8");
+    const exportBody = source.match(/async function handleExportTranscript\(args\) \{([\s\S]*?)\n  \}\n\n  async function handleImportTranscript/)?.[1] || "";
+
+    expect(source).toContain("runtimeTranscriptCapabilities");
+    expect(source).toContain("missingMethods");
+    expect(source).toContain("canDeriveHasTranscriptFromExport");
+    expect(source).toContain("premierepro.Transcript.hasTranscript(clipProjectItem) [optional in Premiere 26.2]");
+    expect(source).toContain("Transcript.exportToJSON failed; transcript state is unknown");
+    expect(exportBody).toContain("ensureCanExportTranscript");
+    expect(exportBody).toContain("api.Transcript.exportToJSON");
+    expect(exportBody).not.toContain("hasTranscript");
+  });
+
   it("documents MCP bridge status separately from optional diagnostics status files", () => {
     const readme = readFileSync(PANEL_README, "utf-8");
 

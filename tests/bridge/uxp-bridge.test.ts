@@ -132,6 +132,52 @@ describe("UxpBridge", () => {
     });
   });
 
+  it("preserves structured diagnostics posted with failed UXP results", async () => {
+    bridge = new UxpBridge({
+      enabled: true,
+      port: 0,
+      commandTimeoutMs: 1000,
+      pollTimeoutMs: 1000,
+    });
+    const status = await bridge.start();
+    const baseUrl = status.url;
+    if (!baseUrl) throw new Error("Expected UXP bridge URL");
+
+    const commandResult = sendUxpCommand(bridge, "textPanel.exportTranscript", {
+      clipProjectItemId: "IMG_4216.MOV",
+    });
+
+    const pollResponse = await fetch(`${baseUrl}/uxp/poll`);
+    const pollBody = (await pollResponse.json()) as { command: UxpCommand };
+
+    await fetch(`${baseUrl}/uxp/result`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: pollBody.command.id,
+        success: false,
+        error: "missing transcript export method",
+        data: {
+          missingMethods: ["premierepro.Transcript.exportToJSON"],
+          runtimeTranscriptCapabilities: {
+            transcriptMethods: { exportToJSON: "undefined" },
+          },
+        },
+      }),
+    });
+
+    await expect(commandResult).resolves.toEqual({
+      success: false,
+      error: "missing transcript export method",
+      data: {
+        missingMethods: ["premierepro.Transcript.exportToJSON"],
+        runtimeTranscriptCapabilities: {
+          transcriptMethods: { exportToJSON: "undefined" },
+        },
+      },
+    });
+  });
+
   it("times out queued commands when no panel posts a result", async () => {
     bridge = new UxpBridge({
       enabled: true,

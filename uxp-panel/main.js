@@ -93,12 +93,198 @@
     return typeof value === "string" ? value : JSON.stringify(value);
   }
 
+  var TRANSCRIPT_METHOD_NAMES = [
+    "hasTranscript",
+    "exportToJSON",
+    "importFromJSON",
+    "createImportTextSegmentsAction",
+    "querySupportedLanguages"
+  ];
+  var TEXT_SEGMENTS_METHOD_NAMES = ["importFromJSON", "exportToJSON"];
+
+  function addUnique(list, value) {
+    if (value === undefined || value === null) return;
+    var text = String(value);
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] === text) return;
+    }
+    list.push(text);
+  }
+
+  function collectKeys(value) {
+    var keys = [];
+    if (!value) return keys;
+
+    try {
+      var ownKeys = Object.keys(value);
+      for (var i = 0; i < ownKeys.length; i++) addUnique(keys, ownKeys[i]);
+    } catch (error) {}
+
+    try {
+      var propNames = Object.getOwnPropertyNames(value);
+      for (var j = 0; j < propNames.length; j++) addUnique(keys, propNames[j]);
+    } catch (error2) {}
+
+    try {
+      for (var key in value) addUnique(keys, key);
+    } catch (error3) {}
+
+    try {
+      keys.sort();
+    } catch (error4) {}
+    return keys;
+  }
+
+  function propertyType(value, name) {
+    if (!value) return "missing";
+    try {
+      return typeof value[name];
+    } catch (error) {
+      return "error";
+    }
+  }
+
+  function methodTypes(value, names) {
+    var methods = {};
+    for (var i = 0; i < names.length; i++) {
+      methods[names[i]] = propertyType(value, names[i]);
+    }
+    return methods;
+  }
+
+  function runtimeTranscriptCapabilities() {
+    var transcript = ppro && ppro.Transcript;
+    var textSegments = ppro && ppro.TextSegments;
+    var transcriptMethods = methodTypes(transcript, TRANSCRIPT_METHOD_NAMES);
+    var textSegmentsMethods = methodTypes(textSegments, TEXT_SEGMENTS_METHOD_NAMES);
+    var missingExportMethods = [];
+    var missingDirectHasTranscriptMethods = [];
+    var missingImportMethods = [];
+
+    if (!ppro) {
+      missingExportMethods.push('require("premierepro")');
+      missingDirectHasTranscriptMethods.push('require("premierepro")');
+      missingImportMethods.push('require("premierepro")');
+    } else if (!transcript) {
+      missingExportMethods.push("premierepro.Transcript");
+      missingDirectHasTranscriptMethods.push("premierepro.Transcript");
+      missingImportMethods.push("premierepro.Transcript");
+    } else {
+      if (transcriptMethods.exportToJSON !== "function") {
+        missingExportMethods.push("premierepro.Transcript.exportToJSON");
+      }
+      if (transcriptMethods.hasTranscript !== "function") {
+        missingDirectHasTranscriptMethods.push("premierepro.Transcript.hasTranscript");
+      }
+      if (transcriptMethods.importFromJSON !== "function") {
+        missingImportMethods.push("premierepro.Transcript.importFromJSON");
+      }
+      if (transcriptMethods.createImportTextSegmentsAction !== "function") {
+        missingImportMethods.push("premierepro.Transcript.createImportTextSegmentsAction");
+      }
+    }
+
+    return {
+      hasPremiereProModule: !!ppro,
+      hasTranscriptNamespace: !!transcript,
+      hasTextSegmentsNamespace: !!textSegments,
+      transcriptKeys: collectKeys(transcript),
+      textSegmentsKeys: collectKeys(textSegments),
+      transcriptMethods: transcriptMethods,
+      textSegmentsMethods: textSegmentsMethods,
+      directHasTranscriptAvailable: missingDirectHasTranscriptMethods.length === 0,
+      canDeriveHasTranscriptFromExport: missingExportMethods.length === 0,
+      canExportTranscript: missingExportMethods.length === 0,
+      canImportTranscript: missingImportMethods.length === 0,
+      missingMethods: {
+        exportTranscript: missingExportMethods,
+        directHasTranscript: missingDirectHasTranscriptMethods,
+        importTranscript: missingImportMethods
+      },
+      knownPublicTranscriptMethods: [
+        "premierepro.Transcript.exportToJSON(clipProjectItem)",
+        "premierepro.Transcript.importFromJSON(json)",
+        "premierepro.TextSegments.importFromJSON(json, callback) [alternate callback API, not used by MCP import]",
+        "premierepro.Transcript.createImportTextSegmentsAction(textSegments, clipProjectItem)",
+        "premierepro.Transcript.querySupportedLanguages()",
+        "premierepro.Transcript.hasTranscript(clipProjectItem) [optional in Premiere 26.2]"
+      ]
+    };
+  }
+
+  function makeDiagnosticError(message, diagnostic) {
+    var error = new Error(message);
+    error.diagnostic = diagnostic;
+    return error;
+  }
+
+  function ensureCanExportTranscript(operation) {
+    var capabilities = runtimeTranscriptCapabilities();
+    var missing = capabilities.missingMethods.exportTranscript;
+    if (missing.length > 0) {
+      throw makeDiagnosticError(
+        operation + " cannot run because the Premiere UXP runtime is missing: " + missing.join(", "),
+        {
+          operation: operation,
+          missingMethods: missing,
+          runtimeTranscriptCapabilities: capabilities
+        }
+      );
+    }
+    return capabilities;
+  }
+
+  function ensureCanImportTranscript(operation) {
+    var capabilities = runtimeTranscriptCapabilities();
+    var missing = capabilities.missingMethods.importTranscript;
+    if (missing.length > 0) {
+      throw makeDiagnosticError(
+        operation + " cannot run because the Premiere UXP runtime is missing: " + missing.join(", "),
+        {
+          operation: operation,
+          missingMethods: missing,
+          runtimeTranscriptCapabilities: capabilities
+        }
+      );
+    }
+    return capabilities;
+  }
+
+  function parseTranscriptValue(value, operation, capabilities, extraDiagnostic) {
+    try {
+      if (typeof value === "string") return JSON.parse(value);
+      return value;
+    } catch (error) {
+      throw makeDiagnosticError(
+        operation + " returned transcript content that was not valid JSON: " +
+          (error && error.message ? error.message : String(error)),
+        {
+          operation: operation,
+          missingMethods: [],
+          returnedType: typeof value,
+          returnedPrefix: typeof value === "string" ? value.substring(0, 160) : null,
+          runtimeTranscriptCapabilities: capabilities,
+          extra: extraDiagnostic || null
+        }
+      );
+    }
+  }
+
+  function transcriptSummary(transcript) {
+    if (!transcript || typeof transcript !== "object") {
+      return { validShape: false };
+    }
+    return {
+      validShape: !!(transcript.language && transcript.segments && transcript.speakers),
+      language: transcript.language || null,
+      segmentCount: transcript.segments && transcript.segments.length !== undefined ? transcript.segments.length : null,
+      speakerCount: transcript.speakers && transcript.speakers.length !== undefined ? transcript.speakers.length : null
+    };
+  }
+
   function requirePremierePro() {
     if (!ppro) {
       throw new Error('UXP module require("premierepro") is not available');
-    }
-    if (!ppro.Transcript) {
-      throw new Error("premierepro.Transcript is not available in this Premiere Pro runtime");
     }
     return ppro;
   }
@@ -199,18 +385,26 @@
   }
 
   async function handlePing() {
+    var capabilities = runtimeTranscriptCapabilities();
     return {
       pong: true,
       premiereproModule: !!ppro,
-      transcriptApi: !!(ppro && ppro.Transcript),
-      clientId: clientIdInput.value
+      transcriptApi: capabilities.hasTranscriptNamespace,
+      clientId: clientIdInput.value,
+      runtimeTranscriptCapabilities: capabilities
     };
   }
 
   async function handleCapabilities() {
+    var capabilities = runtimeTranscriptCapabilities();
     var languages = null;
+    var languagesError = null;
     if (ppro && ppro.Transcript && typeof ppro.Transcript.querySupportedLanguages === "function") {
-      languages = await ppro.Transcript.querySupportedLanguages();
+      try {
+        languages = await ppro.Transcript.querySupportedLanguages();
+      } catch (error) {
+        languagesError = error && error.message ? error.message : String(error);
+      }
     }
 
     return {
@@ -228,40 +422,125 @@
       ],
       requiresPremierePro: true,
       requiresUxpPremiereProModule: true,
-      transcriptApi: !!(ppro && ppro.Transcript),
-      supportedLanguages: languages
+      transcriptApi: capabilities.hasTranscriptNamespace,
+      runtimeTranscriptCapabilities: capabilities,
+      supportedLanguages: languages,
+      supportedLanguagesError: languagesError
     };
   }
 
   async function handleHasTranscript(args) {
     var api = requirePremierePro();
     var resolved = await resolveClip(args);
-    var hasTranscript = api.Transcript.hasTranscript(resolved.clip);
+    var capabilities = runtimeTranscriptCapabilities();
+    var methodUsed = null;
+    var hasTranscript = null;
+    var exportProbe = null;
+
+    if (api.Transcript && typeof api.Transcript.hasTranscript === "function") {
+      methodUsed = "premierepro.Transcript.hasTranscript";
+      hasTranscript = !!api.Transcript.hasTranscript(resolved.clip);
+    } else if (capabilities.missingMethods.exportTranscript.length === 0) {
+      methodUsed = "premierepro.Transcript.exportToJSON";
+      try {
+        var transcriptJson = await api.Transcript.exportToJSON(resolved.clip);
+        var transcript = parseTranscriptValue(transcriptJson, "has_transcript fallback export probe", capabilities, null);
+        var summary = transcriptSummary(transcript);
+        if (!summary.validShape) {
+          throw makeDiagnosticError(
+            "Transcript.exportToJSON succeeded but returned content that does not look like Adobe transcript JSON",
+            {
+              operation: "has_transcript",
+              missingMethods: capabilities.missingMethods.directHasTranscript,
+              methodUsed: methodUsed,
+              transcriptSummary: summary,
+              runtimeTranscriptCapabilities: capabilities,
+              clip: await clipSummary(resolved.clip)
+            }
+          );
+        }
+        hasTranscript = true;
+        exportProbe = {
+          methodUsed: methodUsed,
+          returnedType: typeof transcriptJson,
+          transcriptSummary: summary
+        };
+      } catch (error) {
+        if (error && error.diagnostic) throw error;
+        throw makeDiagnosticError(
+          "premierepro.Transcript.hasTranscript is not available, and fallback " +
+            "premierepro.Transcript.exportToJSON failed; transcript state is unknown: " +
+            (error && error.message ? error.message : String(error)),
+          {
+            operation: "has_transcript",
+            missingMethods: capabilities.missingMethods.directHasTranscript,
+            fallbackMethod: methodUsed,
+            fallbackError: error && error.message ? error.message : String(error),
+            runtimeTranscriptCapabilities: capabilities,
+            clip: await clipSummary(resolved.clip)
+          }
+        );
+      }
+    } else {
+      throw makeDiagnosticError(
+        "Cannot check transcript state because neither direct hasTranscript nor export fallback is available",
+        {
+          operation: "has_transcript",
+          missingMethods: capabilities.missingMethods.directHasTranscript.concat(capabilities.missingMethods.exportTranscript),
+          runtimeTranscriptCapabilities: capabilities,
+          clip: await clipSummary(resolved.clip)
+        }
+      );
+    }
+
     return {
       hasTranscript: !!hasTranscript,
+      methodUsed: methodUsed,
+      exportProbe: exportProbe,
       clip: await clipSummary(resolved.clip),
       selected: !!resolved.selected,
-      selectedCount: resolved.selectedCount || 0
+      selectedCount: resolved.selectedCount || 0,
+      runtimeTranscriptCapabilities: capabilities
     };
   }
 
   async function handleExportTranscript(args) {
     var api = requirePremierePro();
+    var capabilities = ensureCanExportTranscript("export_transcript_json");
     var resolved = await resolveClip(args);
-    var transcriptJson = await api.Transcript.exportToJSON(resolved.clip);
-    var transcript = transcriptJson;
-    if (typeof transcriptJson === "string") {
-      transcript = JSON.parse(transcriptJson);
+    var transcriptJson;
+    var transcript;
+    try {
+      transcriptJson = await api.Transcript.exportToJSON(resolved.clip);
+      transcript = parseTranscriptValue(transcriptJson, "export_transcript_json", capabilities, {
+        clip: await clipSummary(resolved.clip)
+      });
+    } catch (error) {
+      if (error && error.diagnostic) throw error;
+      throw makeDiagnosticError(
+        "premierepro.Transcript.exportToJSON failed: " +
+          (error && error.message ? error.message : String(error)),
+        {
+          operation: "export_transcript_json",
+          missingMethods: capabilities.missingMethods.exportTranscript,
+          runtimeTranscriptCapabilities: capabilities,
+          clip: await clipSummary(resolved.clip),
+          exportError: error && error.message ? error.message : String(error)
+        }
+      );
     }
     return {
       transcript: transcript,
+      methodUsed: "premierepro.Transcript.exportToJSON",
       clip: await clipSummary(resolved.clip),
-      selected: !!resolved.selected
+      selected: !!resolved.selected,
+      runtimeTranscriptCapabilities: capabilities
     };
   }
 
   async function handleImportTranscript(args) {
     var api = requirePremierePro();
+    var capabilities = ensureCanImportTranscript("import_transcript_json");
     var resolved = await resolveClip(args);
     var transcriptJson = getTranscriptJson(args);
     var textSegments = api.Transcript.importFromJSON(transcriptJson);
@@ -277,7 +556,8 @@
       imported: !!success,
       transactionResult: success,
       clip: await clipSummary(resolved.clip),
-      selected: !!resolved.selected
+      selected: !!resolved.selected,
+      runtimeTranscriptCapabilities: capabilities
     };
   }
 
@@ -311,6 +591,13 @@
       body.data = payload;
     } else {
       body.error = payload instanceof Error ? payload.message : String(payload);
+      if (payload && typeof payload === "object") {
+        if (payload.diagnostic) {
+          body.data = payload.diagnostic;
+        } else if (!(payload instanceof Error)) {
+          body.data = payload;
+        }
+      }
     }
 
     var response = await fetch(baseUrl + "/uxp/result", {
