@@ -11,7 +11,7 @@
   "manifestVersion": 5,
   "requiredPermissions": {
     "network": {
-      "domains": ["http://127.0.0.1:17777", "http://localhost:17777"]
+      "domains": "all"
     }
   },
   "entrypoints": [

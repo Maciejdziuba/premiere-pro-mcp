@@ -12,10 +12,20 @@ Minimal Premiere Pro UXP panel for Text panel transcript commands only.
 5. In Premiere Pro, open the panel from the UXP plugin menu if it is not already visible.
 6. Set the local bridge URL, for example `http://127.0.0.1:17777`, then click **Start**.
 
-The panel manifest permits the default `http://127.0.0.1:17777` and
-`http://localhost:17777` bridge origins. If you change
-`PREMIERE_UXP_BRIDGE_PORT`, update `manifest.json` to match before loading the
-panel in UXP Developer Tool.
+The panel manifest requests `requiredPermissions.network.domains: "all"`, the
+reliable UXP form for reaching a local HTTP sidecar (it matches Adobe's own UXP
+oauth sample). This works for any `PREMIERE_UXP_BRIDGE_PORT` without editing the
+manifest.
+
+### Troubleshooting: panel errors before any commands
+
+If the panel shows `Error after 0 command(s)` and the sidecar is reachable
+(`GET http://127.0.0.1:17777/uxp/status` responds, but
+`get_uxp_bridge_status` still reports `panelOnline: false` / `lastPollAt: null`),
+the panel's outbound `fetch` is being blocked by a stale network permission.
+After any change to `manifest.json` network permissions, **unload and reload**
+the plugin in UXP Developer Tool (a reload alone may not re-read permissions),
+then click **Start** again.
 
 ## Protocol
 

@@ -18,14 +18,13 @@ describe("UXP panel static contracts", () => {
     expect(html).toContain('<button id="pingButton">Status</button>');
   });
 
-  it("manifest allows explicit localhost HTTP bridge origins for the default sidecar port", () => {
+  it("manifest grants the reliable UXP network permission for the local HTTP bridge", () => {
     const manifest = JSON.parse(readFileSync(PANEL_MANIFEST, "utf-8"));
 
     expect(manifest.manifestVersion).toBe(5);
-    expect(manifest.requiredPermissions.network.domains).toEqual([
-      "http://127.0.0.1:17777",
-      "http://localhost:17777",
-    ]);
+    // UXP enforces explicit-origin allowlists inconsistently for localhost HTTP
+    // sidecars; the reliable form (matching Adobe's own oauth sample) is "all".
+    expect(manifest.requiredPermissions.network.domains).toBe("all");
   });
 
   it("documents MCP bridge status separately from optional diagnostics status files", () => {
