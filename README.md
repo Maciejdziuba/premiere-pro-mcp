@@ -6,7 +6,7 @@
 
 **Give AI full control over Adobe Premiere Pro.**
 
-288 tools across 28 modules — the most comprehensive MCP server for video editing.
+297 tools across 28 modules — the most comprehensive MCP server for video editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
@@ -27,7 +27,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 "Add the B-roll clips to V2, apply a cross dissolve between each, color correct them to match the A-roll, and export a 1080p ProRes."
 ```
 
-The AI handles the entire workflow through 288 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro.
+The AI handles the workflow through 297 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro, with explicit unsupported errors where Adobe only exposes a workflow through UXP or the Premiere UI.
 
 ---
 
@@ -164,6 +164,51 @@ Add to `.cursor/mcp.json` in your project or global config:
 
 ---
 
+## Safe validation harness
+
+This fork includes a conservative diagnostics harness for checking tool/runtime
+claims without risking a real project.
+
+```bash
+npm run diagnostics:sweep
+npm run diagnostics:sweep -- --dry-run
+npm run diagnostics:sweep -- --dry-run --json
+```
+
+Dry-run is the default. It does not import `dist/`, contact the CEP bridge,
+open Premiere, save, export, delete, enqueue AME jobs, or modify media. It
+prints the planned checks plus static contract labels for known high-risk
+areas: captions/transcript claims, in/out time units, Auto Reframe signature,
+text overlay styling, and frame-capture/export capability.
+
+To run read-only live bridge/runtime checks against an already open Premiere
+project:
+
+```bash
+npm run build
+npm run diagnostics:sweep -- --run-readonly
+npm run diagnostics:sweep -- --run-readonly --include-project
+```
+
+Read-only live mode checks bridge health, Premiere version/locale/runtime, and
+optional project/timeline inspection. It does not edit timelines or media.
+
+Live probes are intentionally harder to run because they mutate the currently
+open project. Use a disposable scratch project only:
+
+```bash
+npm run build
+npm run diagnostics:sweep -- --live-probes --confirm-live-probes
+```
+
+Live probes create only `MCP_TEST_VALIDATE_*` scratch assets/sequences and
+attempt caption creation, in/out seconds, Auto Reframe, text overlay, and frame
+capture capability probes. They never save the project, export files, delete
+items, or start Adobe Media Encoder. The script refuses `--live-probes` unless
+`--confirm-live-probes` is present.
+
+---
+
 ## Architecture
 
 **Local (stdio):**
@@ -201,7 +246,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 ---
 
-## Tools (288)
+## Tools (297)
 
 ### Discovery & Inspection (10 + 10)
 
@@ -286,7 +331,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 |------|-------------|
 | `export_sequence` | Export via Adobe Media Encoder |
 | `get_export_capabilities` / `diagnose_export_preset` | AME/export diagnostics |
-| `capture_frame` | Export frame as PNG, return as base64 image |
+| `capture_frame` | Return a PNG frame as base64 when Premiere exposes a frame-export API; otherwise report unsupported capability |
 | `export_as_fcp_xml` / `export_aaf` / `export_omf` | Interchange formats |
 | `batch_export_sequences` / `batch_export_interchange` | Batch AME queueing and interchange exports |
 | `encode_project_item` / `encode_file` | Direct encoding |
@@ -327,19 +372,43 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 |------|-------------|
 | `create_sequence` / `create_sequence_from_preset` | Create sequences |
 | `duplicate_sequence` / `delete_sequence` | Manage sequences |
-| `auto_reframe_sequence` | Auto-reframe for social media |
+| `auto_reframe_sequence` | Auto-reframe for social media by deriving Premiere's aspect-ratio signature from target dimensions |
 | `attach_custom_property` | FCP XML custom properties |
 | `unnest_sequence` | Replace nested sequence with its clips |
 
-### Workspace & Captions (2 + 5)
+### Text, MOGRTs & Caption-Like Overlays (4)
+
+| Tool | Description |
+|------|-------------|
+| `add_text_overlay` | Create a single caption-like transparent PNG text overlay and place it on a video track |
+| `add_caption_text_overlays` | Batch-create timed single-line bottom text overlays from caption-style entries |
+| `import_mogrt` / `import_mogrt_from_library` | Import Motion Graphics Templates |
+
+Use real caption tools when you need editable Premiere caption/subtitle tracks from sidecar files. Use `add_text_overlay` or `add_caption_text_overlays` when you need visible styled bottom yellow text and can accept graphics overlays instead of real caption-track items. Target an empty upper video track for these overlays; the tools refuse occupied target ranges by default.
+
+### Workspace & Captions (2 + 13)
 
 | Tool | Description |
 |------|-------------|
 | `get_workspaces` / `set_workspace` | Switch workspace layouts |
 | `parse_srt_file` / `write_srt_file` | Local SRT helper utilities |
+| `parse_transcript_json_file` / `write_transcript_json_file` | Validate local Adobe Text panel transcript JSON |
+| `convert_srt_to_transcript_json_file` | Convert SRT captions to Adobe transcript JSON |
+| `export_transcript_json_to_srt_file` | Convert Adobe transcript JSON to SRT |
 | `import_caption_file` | Import caption sidecar files |
 | `get_caption_api_capabilities` | Report caption API availability |
 | `create_caption_track` | Create caption/subtitle tracks |
+| `import_text_panel_transcript` / `export_text_panel_transcript` | Return explicit UXP-required unsupported errors under the CEP bridge |
+| `create_captions_from_text_panel_transcript` | Return explicit UXP/UI-required unsupported errors under the CEP bridge |
+| `auto_transcribe_sequence` | Return explicit unsupported error; Speech-to-Text auto-transcribe is not public ExtendScript |
+
+#### Captions and Text panel transcripts
+
+Premiere has two separate surfaces here:
+
+- **CEP/ExtendScript sidecar captions:** this MCP bridge can import local caption sidecar files such as `.srt`, `.vtt`, `.scc`, `.mcc`, and `.stl` into the project, then call `Sequence.createCaptionTrack(projectItem, startTime, captionFormat)` when the active Premiere runtime exposes it. This path creates a sequence caption track from an imported caption ProjectItem, but it does not provide reliable Text panel transcript readback, caption style readback, or Speech-to-Text.
+- **UXP Text panel transcripts:** Premiere Pro 25+ exposes transcript operations in UXP through `Transcript.hasTranscript`, `Transcript.exportToJSON`, `Transcript.importFromJSON`, `TextSegments.importFromJSON`, `Transcript.createImportTextSegmentsAction`, and `Transcript.querySupportedLanguages`. This repository's bridge is CEP/ExtendScript, so it cannot call the UXP `premierepro` module from `CSInterface.evalScript()`. The Text panel import/export/create-caption tools therefore validate inputs where possible and then return a clear unsupported error instead of pretending to run.
+- **Local transcript files:** the transcript JSON helpers use Adobe's public transcript schema shape (`language`, `speakers`, `segments`, timed `words`) so an external UXP panel or manual Text panel workflow can use those files.
 
 ### Scripting (6)
 
@@ -435,7 +504,7 @@ premiere-pro-mcp/
 ├── src/
 │   ├── index.ts                 # Entry point — stdio transport setup
 │   ├── http-server.ts           # Entry point — HTTP/SSE transport (Fly.io / remote)
-│   ├── server.ts                # MCP server — registers all 288 tools + 2 resources
+│   ├── server.ts                # MCP server — registers all 297 tools + 2 resources
 │   ├── bridge/
 │   │   ├── file-bridge.ts       # File-based IPC (write .jsx, poll .json)
 │   │   └── script-builder.ts    # ExtendScript generator with ES3 helpers
@@ -448,7 +517,7 @@ premiere-pro-mcp/
 │   │   ├── effects.ts           # Effect application and color correction
 │   │   ├── transitions.ts       # Transition management (QE DOM)
 │   │   ├── audio.ts             # Audio levels, gain, fades, effects, transitions, diagnostics
-│   │   ├── text.ts              # Text overlays and MOGRTs
+│   │   ├── text.ts              # Text overlays, caption-like PNG overlays, and MOGRTs
 │   │   ├── markers.ts           # Sequence and clip markers
 │   │   ├── tracks.ts            # Track add/delete/lock/visibility
 │   │   ├── playhead.ts          # Playhead, work area, in/out points
@@ -465,7 +534,7 @@ premiere-pro-mcp/
 │   │   ├── utility.ts           # Batch ops, analysis, navigation
 │   │   ├── health.ts            # Connectivity ping
 │   │   ├── workspace.ts         # Workspace layout switching
-│   │   ├── captions.ts          # Caption track creation
+│   │   ├── captions.ts          # Caption sidecars, transcript JSON helpers, and capability diagnostics
 │   │   ├── playback.ts          # Timeline/source playback control
 │   │   └── project-manager.ts   # Project consolidation/transfer
 │   └── resources/
@@ -492,7 +561,7 @@ premiere-pro-mcp/
 
 ### Why CEP instead of UXP?
 
-CEP (Common Extensibility Platform) provides full ExtendScript access in Premiere Pro, including the undocumented **QE DOM** — which is the only way to apply effects by name, perform ripple deletes, and do advanced trim operations. UXP in Premiere Pro is still maturing and lacks equivalent API coverage. CEP works across **Premiere Pro 2020–2025+**.
+CEP (Common Extensibility Platform) provides full ExtendScript access in Premiere Pro, including the undocumented **QE DOM** — which is the only way to apply effects by name, perform ripple deletes, and do advanced trim operations. UXP in Premiere Pro now exposes some newer surfaces, including Text panel transcript import/export, that CEP cannot call. This bridge reports those UXP-only paths explicitly instead of inflating CEP/ExtendScript support. CEP works across **Premiere Pro 2020–2025+**.
 
 ### ExtendScript Compatibility
 

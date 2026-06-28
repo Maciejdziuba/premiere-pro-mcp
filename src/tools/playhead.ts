@@ -48,7 +48,7 @@ export function getPlayheadTools(bridgeOptions: BridgeOptions) {
     },
 
     set_work_area: {
-      description: "Set the work area (bar) in and out points",
+      description: "Set the work area (bar) in and out points using seconds",
       parameters: {
         type: "object" as const,
         properties: {
@@ -67,9 +67,12 @@ export function getPlayheadTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof seq.setWorkAreaInPoint !== "function" || typeof seq.setWorkAreaOutPoint !== "function") {
+            return __error("Sequence work area setters are not available in this Premiere ExtendScript runtime");
+          }
           
-          seq.setWorkAreaInPoint(__secondsToTicks(${args.in_seconds}).toString());
-          seq.setWorkAreaOutPoint(__secondsToTicks(${args.out_seconds}).toString());
+          seq.setWorkAreaInPoint(${args.in_seconds});
+          seq.setWorkAreaOutPoint(${args.out_seconds});
           
           return __result({ workAreaIn: ${args.in_seconds}, workAreaOut: ${args.out_seconds} });
         `);
@@ -84,10 +87,13 @@ export function getPlayheadTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof seq.getWorkAreaInPoint !== "function" || typeof seq.getWorkAreaOutPoint !== "function") {
+            return __error("Sequence work area getters are not available in this Premiere ExtendScript runtime");
+          }
           
           return __result({
-            inSeconds: __ticksToSeconds(seq.workInPoint.ticks),
-            outSeconds: __ticksToSeconds(seq.workOutPoint.ticks)
+            inSeconds: parseFloat(seq.getWorkAreaInPoint()),
+            outSeconds: parseFloat(seq.getWorkAreaOutPoint())
           });
         `);
         return sendCommand(script, bridgeOptions);
@@ -95,7 +101,7 @@ export function getPlayheadTools(bridgeOptions: BridgeOptions) {
     },
 
     set_sequence_in_out_points: {
-      description: "Set the sequence in and out points (for export range, etc.)",
+      description: "Set the sequence in and out points in seconds (for export range, etc.)",
       parameters: {
         type: "object" as const,
         properties: {
@@ -114,9 +120,12 @@ export function getPlayheadTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof seq.setInPoint !== "function" || typeof seq.setOutPoint !== "function") {
+            return __error("Sequence in/out setters are not available in this Premiere ExtendScript runtime");
+          }
           
-          seq.setInPoint(__secondsToTicks(${args.in_seconds}).toString());
-          seq.setOutPoint(__secondsToTicks(${args.out_seconds}).toString());
+          seq.setInPoint(${args.in_seconds});
+          seq.setOutPoint(${args.out_seconds});
           
           return __result({ inSeconds: ${args.in_seconds}, outSeconds: ${args.out_seconds} });
         `);
@@ -131,10 +140,13 @@ export function getPlayheadTools(bridgeOptions: BridgeOptions) {
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
+          if (typeof seq.getInPoint !== "function" || typeof seq.getOutPoint !== "function") {
+            return __error("Sequence in/out getters are not available in this Premiere ExtendScript runtime");
+          }
           
           return __result({
-            inSeconds: __ticksToSeconds(seq.getInPoint()),
-            outSeconds: __ticksToSeconds(seq.getOutPoint())
+            inSeconds: parseFloat(seq.getInPoint()),
+            outSeconds: parseFloat(seq.getOutPoint())
           });
         `);
         return sendCommand(script, bridgeOptions);

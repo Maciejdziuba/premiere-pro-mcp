@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { BridgeOptions } from "../../src/bridge/file-bridge.js";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -71,7 +71,7 @@ const ALL_MODULES: Array<{
   { name: "effects", getter: getEffectsTools, minTools: 9 },
   { name: "transitions", getter: getTransitionsTools, minTools: 6 },
   { name: "audio", getter: getAudioTools, minTools: 10 },
-  { name: "text", getter: getTextTools, minTools: 2 },
+  { name: "text", getter: getTextTools, minTools: 4 },
   { name: "markers", getter: getMarkerTools, minTools: 3 },
   { name: "tracks", getter: getTrackTools, minTools: 3 },
   { name: "playhead", getter: getPlayheadTools, minTools: 4 },
@@ -88,7 +88,7 @@ const ALL_MODULES: Array<{
   { name: "utility", getter: getUtilityTools, minTools: 15 },
   { name: "health", getter: getHealthTools, minTools: 4 },
   { name: "workspace", getter: getWorkspaceTools, minTools: 2 },
-  { name: "captions", getter: getCaptionTools, minTools: 5 },
+  { name: "captions", getter: getCaptionTools, minTools: 13 },
   { name: "playback", getter: getPlaybackTools, minTools: 3 },
   { name: "project-manager", getter: getProjectManagerTools, minTools: 1 },
 ];
@@ -172,12 +172,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 288 tools", () => {
+  it("all modules together have 297 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(288);
+    expect(total).toBe(297);
   });
 
   it("there are 28 modules", () => {
@@ -380,6 +380,95 @@ describe("Tool Handler Behavior", () => {
       expect(userCode).toContain('__findKnownProperty(motionComp, "motion", "position")');
       expect(userCode).toContain("missingProperties");
       expect(userCode).not.toContain('displayName === "Motion"');
+    });
+  });
+
+  describe("sequence and playhead runtime wrappers", () => {
+    it("set_sequence_in_out_points passes seconds directly to Premiere sequence in/out setters", async () => {
+      const tools = getPlayheadTools(bridgeOptions);
+      await (tools.set_sequence_in_out_points.handler as any)({
+        in_seconds: 1.25,
+        out_seconds: 4.5,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("seq.setInPoint(1.25)");
+      expect(userCode).toContain("seq.setOutPoint(4.5)");
+      expect(userCode).toContain("Sequence in/out setters are not available");
+      expect(userCode).not.toContain("__secondsToTicks(1.25)");
+      expect(userCode).not.toContain("__secondsToTicks(4.5)");
+    });
+
+    it("get_sequence_in_out_points reads Premiere seconds strings without tick conversion", async () => {
+      const tools = getPlayheadTools(bridgeOptions);
+      await (tools.get_sequence_in_out_points.handler as any)({});
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("parseFloat(seq.getInPoint())");
+      expect(userCode).toContain("parseFloat(seq.getOutPoint())");
+      expect(userCode).not.toContain("__ticksToSeconds(seq.getInPoint())");
+      expect(userCode).not.toContain("__ticksToSeconds(seq.getOutPoint())");
+    });
+
+    it("work area wrappers also use seconds-based sequence APIs", async () => {
+      const tools = getPlayheadTools(bridgeOptions);
+      await (tools.set_work_area.handler as any)({
+        in_seconds: 2.5,
+        out_seconds: 6.75,
+      });
+
+      let script = mockedSendCommand.mock.calls[0][0];
+      let userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("seq.setWorkAreaInPoint(2.5)");
+      expect(userCode).toContain("seq.setWorkAreaOutPoint(6.75)");
+      expect(userCode).not.toContain("__secondsToTicks(2.5)");
+      expect(userCode).not.toContain("__secondsToTicks(6.75)");
+
+      vi.clearAllMocks();
+      await (tools.get_work_area.handler as any)({});
+      script = mockedSendCommand.mock.calls[0][0];
+      userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("parseFloat(seq.getWorkAreaInPoint())");
+      expect(userCode).toContain("parseFloat(seq.getWorkAreaOutPoint())");
+      expect(userCode).not.toContain("seq.workInPoint.ticks");
+      expect(userCode).not.toContain("seq.workOutPoint.ticks");
+    });
+
+    it("auto_reframe_sequence reduces target dimensions to the documented API ratio signature", async () => {
+      const tools = getSequenceTools(bridgeOptions);
+      await (tools.auto_reframe_sequence.handler as any)({
+        sequence_id: "source-seq",
+        target_width: 1080,
+        target_height: 1920,
+        motion_preset: "slower",
+        new_sequence_name: "Vertical Cut",
+        use_nested_sequences: true,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("var numerator = 9");
+      expect(userCode).toContain("var denominator = 16");
+      expect(userCode).toContain('var motionPreset = "slower"');
+      expect(userCode).toContain('var newSequenceName = "Vertical Cut"');
+      expect(userCode).toContain("var useNestedSequences = true");
+      expect(userCode).toContain("seq.autoReframeSequence(numerator, denominator, motionPreset, newSequenceName, useNestedSequences)");
+      expect(userCode).toContain("autoReframeSequence is not available");
+      expect(userCode).not.toContain("seq.autoReframeSequence(1080, 1920, false)");
+    });
+
+    it("auto_reframe_sequence rejects invalid target dimensions before bridge I/O", async () => {
+      const tools = getSequenceTools(bridgeOptions);
+      const result = await (tools.auto_reframe_sequence.handler as any)({
+        target_width: 0,
+        target_height: 1920,
+      });
+
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("target_width and target_height must be positive numbers");
     });
   });
 
@@ -621,11 +710,91 @@ describe("Tool Handler Behavior", () => {
     });
   });
 
+  describe("text overlay tools", () => {
+    it("add_text_overlay generates a caption-like PNG import script instead of using real captions", async () => {
+      const tools = getTextTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-text-overlay-"));
+
+      try {
+        await (tools.add_text_overlay.handler as any)({
+          text: "Bottom yellow text",
+          track_index: 2,
+          start_seconds: 1,
+          duration_seconds: 2.5,
+          font_color: "#ffff00",
+          font_size: 64,
+          video_width: 640,
+          video_height: 360,
+          bottom_margin: 48,
+          asset_output_dir: tempDir,
+        });
+
+        const files = readdirSync(tempDir).filter((file) => file.endsWith(".png"));
+        expect(files.length).toBe(1);
+        expect(Array.from(readFileSync(join(tempDir, files[0])).subarray(0, 8))).toEqual([
+          137, 80, 78, 71, 13, 10, 26, 10,
+        ]);
+
+        const script = mockedSendCommand.mock.calls[0][0];
+        expect(script).toContain("app.project.importFiles");
+        expect(script).toContain("seq.overwriteClip");
+        expect(script).toContain("setOutPoint");
+        expect(script).toContain("var allowOverwrite = false");
+        expect(script).toContain("__captionOverlayCollectOverlaps");
+        expect(script).toContain("Target video track/range is not empty");
+        expect(script).toContain('overlayKind: "caption_like_png_text_overlay"');
+        expect(script).toContain("realCaptionTrack: false");
+        expect(script).toContain("singleLine: true");
+        expect(script).toContain('position: "bottom"');
+        expect(script).toContain('color: "#ffff00"');
+        expect(script).not.toContain("createCaptionTrack");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("add_caption_text_overlays batches timed entries into single-line PNG overlays", async () => {
+      const tools = getTextTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-caption-overlays-"));
+
+      try {
+        expect(tools.add_caption_text_overlays.parameters.required).toContain("captions");
+        expect((tools.add_caption_text_overlays.parameters.properties as any).font_color.description).toContain("yellow");
+        expect((tools.add_caption_text_overlays.parameters.properties as any).allow_overwrite.description).toContain("empty upper video track");
+
+        await (tools.add_caption_text_overlays.handler as any)({
+          captions: [
+            { start_seconds: 0, end_seconds: 1.2, text: "First caption" },
+            { start_seconds: 1.4, end_seconds: 2.4, text: "Second\ncaption" },
+          ],
+          asset_output_dir: tempDir,
+          font_color: "#ffd400",
+          video_width: 640,
+          video_height: 360,
+        });
+
+        const files = readdirSync(tempDir).filter((file) => file.endsWith(".png"));
+        expect(files.length).toBe(2);
+
+        const script = mockedSendCommand.mock.calls[0][0];
+        expect(script).toContain("var overlayEntries");
+        expect(script).toContain("First caption");
+        expect(script).toContain("Second caption");
+        expect(script).toContain("count: placed.length");
+        expect(script).toContain("realCaptionTrack: false");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe("caption tools", () => {
     it("create_caption_track generates correct script", async () => {
       const tools = getCaptionTools(bridgeOptions);
       const toolNames = Object.keys(tools);
       expect(toolNames).toContain("create_caption_track");
+      expect(toolNames).toContain("parse_transcript_json_file");
+      expect(toolNames).toContain("import_text_panel_transcript");
 
       await (tools.create_caption_track.handler as any)({ item_id: "my-srt-file" });
       const script = mockedSendCommand.mock.calls[0][0];
@@ -679,6 +848,180 @@ describe("Tool Handler Behavior", () => {
         rmSync(tempDir, { recursive: true, force: true });
       }
     });
+
+    it("parse_transcript_json_file validates Adobe transcript JSON locally", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-"));
+      const transcriptPath = join(tempDir, "transcript.json");
+
+      try {
+        writeFileSync(
+          transcriptPath,
+          JSON.stringify({
+            language: "en-us",
+            speakers: [{ id: "00000000-0000-4000-8000-000000000001", name: "Speaker 1" }],
+            segments: [
+              {
+                duration: 1.25,
+                language: "en-us",
+                speaker: "00000000-0000-4000-8000-000000000001",
+                start: 0,
+                words: [
+                  {
+                    confidence: 1,
+                    duration: 1.25,
+                    eos: true,
+                    start: 0,
+                    tags: [],
+                    text: "Hello",
+                    type: "word",
+                  },
+                ],
+              },
+            ],
+          }),
+          "utf-8"
+        );
+
+        const result = await (tools.parse_transcript_json_file.handler as any)({
+          file_path: transcriptPath,
+        });
+
+        expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        expect(result.data).toMatchObject({
+          language: "en-us",
+          segmentCount: 1,
+          wordCount: 1,
+          speakerCount: 1,
+          requiresPremiere: false,
+        });
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("convert_srt_to_transcript_json_file writes valid transcript JSON locally", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-convert-"));
+      const srtPath = join(tempDir, "source.srt");
+      const transcriptPath = join(tempDir, "transcript.json");
+
+      try {
+        writeFileSync(
+          srtPath,
+          "1\n00:00:00,000 --> 00:00:02,000\nHello transcript world.\n",
+          "utf-8"
+        );
+
+        const result = await (tools.convert_srt_to_transcript_json_file.handler as any)({
+          srt_path: srtPath,
+          output_path: transcriptPath,
+          language: "en-us",
+        });
+
+        expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        const written = JSON.parse(readFileSync(transcriptPath, "utf-8"));
+        expect(written.segments[0].words).toHaveLength(3);
+        expect(written.speakers[0].name).toBe("Speaker 1");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("export_transcript_json_to_srt_file renders transcript segments as SRT", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-srt-"));
+      const transcriptPath = join(tempDir, "transcript.json");
+      const srtPath = join(tempDir, "out.srt");
+
+      try {
+        writeFileSync(
+          transcriptPath,
+          JSON.stringify({
+            language: "en-us",
+            speakers: [{ id: "00000000-0000-4000-8000-000000000001", name: "Speaker 1" }],
+            segments: [
+              {
+                duration: 1,
+                language: "en-us",
+                speaker: "00000000-0000-4000-8000-000000000001",
+                start: 0.5,
+                words: [
+                  { confidence: 1, duration: 0.5, eos: false, start: 0.5, tags: [], text: "Hello", type: "word" },
+                  { confidence: 1, duration: 0, eos: true, start: 1, tags: [], text: "!", type: "punctuation" },
+                ],
+              },
+            ],
+          }),
+          "utf-8"
+        );
+
+        const result = await (tools.export_transcript_json_to_srt_file.handler as any)({
+          transcript_path: transcriptPath,
+          output_path: srtPath,
+        });
+
+        expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(result.success).toBe(true);
+        expect(readFileSync(srtPath, "utf-8")).toContain("Hello!");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("Text panel transcript import returns an explicit UXP/CEP unsupported error", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+      const tempDir = mkdtempSync(join(tmpdir(), "ppmcp-transcript-unsupported-"));
+      const transcriptPath = join(tempDir, "transcript.json");
+
+      try {
+        writeFileSync(
+          transcriptPath,
+          JSON.stringify({
+            language: "en-us",
+            speakers: [{ id: "00000000-0000-4000-8000-000000000001", name: "Speaker 1" }],
+            segments: [
+              {
+                duration: 1,
+                language: "en-us",
+                speaker: "00000000-0000-4000-8000-000000000001",
+                start: 0,
+                words: [
+                  { confidence: 1, duration: 1, eos: true, start: 0, tags: [], text: "Hello", type: "word" },
+                ],
+              },
+            ],
+          }),
+          "utf-8"
+        );
+
+        const result = await (tools.import_text_panel_transcript.handler as any)({
+          transcript_path: transcriptPath,
+          clip_project_item_id: "clip-1",
+        });
+
+        expect(mockedSendCommand).not.toHaveBeenCalled();
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("CEP/ExtendScript bridge");
+        expect(result.error).toContain("Transcript.importFromJSON");
+      } finally {
+        rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it("get_caption_api_capabilities reports UXP transcript APIs but marks CEP as unable to invoke them", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+
+      await (tools.get_caption_api_capabilities.handler as any)({});
+      const script = mockedSendCommand.mock.calls[0][0];
+
+      expect(script).toContain("canExecuteUxpPremiereProModule");
+      expect(script).toContain("Transcript.exportToJSON");
+      expect(script).toContain("currentBridgeCanInvokeUxpApis");
+      expect(script).toContain("createCaptionTrack");
+    });
   });
 
   describe("transition tools", () => {
@@ -726,6 +1069,9 @@ describe("Tool Handler Behavior", () => {
       expect(script).toContain("exportAAF");
       expect(script).toContain("exportOMF");
       expect(script).toContain("exportAsMediaDirect");
+      expect(script).toContain("frameCapture");
+      expect(script).toContain("standardSequenceExportFramePNG");
+      expect(script).toContain("qeSequenceExportFramePNG");
     });
 
     it("diagnose_export_preset checks preset existence and extension without exporting", async () => {
@@ -750,6 +1096,43 @@ describe("Tool Handler Behavior", () => {
       expect(script).toContain("encoder.encodeSequence");
       expect(script).toContain("started = false");
       expect(script).toContain("Sequence not found");
+    });
+
+    it("export_frame probes frame capture capability instead of assuming exportFramePNG exists", async () => {
+      const tools = getExportTools(bridgeOptions);
+
+      await (tools.export_frame.handler as any)({
+        output_path: "/tmp/frame.png",
+        time_seconds: 3,
+      });
+
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("__mcpGetFrameCaptureCapability");
+      expect(userCode).toContain("__mcpExportFramePng");
+      expect(userCode).toContain("Frame capture unsupported");
+      expect(userCode).toContain("qe.project.getActiveSequence()");
+      expect(userCode).toContain("standardSequenceExportFramePNG");
+      expect(userCode).not.toContain("seq.exportFramePNG(seq.getPlayerPosition().ticks, outputPath);");
+    });
+
+    it("capture_frame returns unsupported bridge errors without looking for a temp image", async () => {
+      mockedSendCommand.mockResolvedValueOnce({
+        success: false,
+        error: "Frame capture unsupported: No scriptable frame PNG export API is available",
+      });
+      const tools = getExportTools(bridgeOptions);
+
+      const result = await (tools.capture_frame.handler as any)({ time_seconds: 3 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Frame capture unsupported");
+      const script = mockedSendCommand.mock.calls[0][0];
+      const userCode = script.split("// === End MCP Bridge Helpers ===")[1] ?? script;
+      expect(userCode).toContain("__mcpGetFrameCaptureCapability");
+      expect(userCode).toContain("__mcpExportFramePng");
+      expect(userCode).toContain("Frame capture unsupported");
+      expect(userCode).not.toContain("seq.exportFramePNG(seq.getPlayerPosition().ticks, outputPath);");
     });
   });
 
