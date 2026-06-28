@@ -21,6 +21,104 @@ function workAreaTypeCode(workAreaType?: string): string {
   }
 }
 
+const FRAME_CAPTURE_HELPERS = `
+function __mcpGetFrameCaptureCapability(seq) {
+  var capability = {
+    supported: false,
+    method: null,
+    requiresQe: false,
+    standardSequenceExportFramePNG: false,
+    qeSequenceExportFramePNG: false,
+    qeEnabledForProbe: false,
+    unsupportedReason: null,
+    probeErrors: []
+  };
+
+  try {
+    capability.standardSequenceExportFramePNG = !!(seq && typeof seq.exportFramePNG === "function");
+  } catch(e) {
+    capability.probeErrors.push("Sequence.exportFramePNG probe failed: " + e.toString());
+  }
+
+  if (capability.standardSequenceExportFramePNG) {
+    capability.supported = true;
+    capability.method = "Sequence.exportFramePNG";
+    return capability;
+  }
+
+  try {
+    if (typeof app.enableQE === "function") {
+      app.enableQE();
+      capability.qeEnabledForProbe = true;
+    }
+    if (typeof qe !== "undefined" && qe.project && typeof qe.project.getActiveSequence === "function") {
+      var qeSeq = qe.project.getActiveSequence();
+      capability.qeSequenceExportFramePNG = !!(qeSeq && typeof qeSeq.exportFramePNG === "function");
+    }
+  } catch(e2) {
+    capability.probeErrors.push("QE exportFramePNG probe failed: " + e2.toString());
+  }
+
+  if (capability.qeSequenceExportFramePNG) {
+    capability.supported = true;
+    capability.method = "QE.Sequence.exportFramePNG";
+    capability.requiresQe = true;
+    return capability;
+  }
+
+  capability.unsupportedReason = "No scriptable frame PNG export API is available. Sequence.exportFramePNG is absent, and QE active sequence exportFramePNG is unavailable.";
+  return capability;
+}
+
+function __mcpExportFramePng(seq, ticks, outputPath) {
+  var capability = __mcpGetFrameCaptureCapability(seq);
+  if (!capability.supported) {
+    return {
+      ok: false,
+      error: "Frame capture unsupported: " + capability.unsupportedReason,
+      capability: capability
+    };
+  }
+
+  try {
+    var result = null;
+    if (capability.method === "Sequence.exportFramePNG") {
+      result = seq.exportFramePNG(ticks, outputPath);
+    } else {
+      var qeSeq = qe.project.getActiveSequence();
+      if (!qeSeq || typeof qeSeq.exportFramePNG !== "function") {
+        return {
+          ok: false,
+          error: "Frame capture unsupported: QE active sequence exportFramePNG became unavailable",
+          capability: capability
+        };
+      }
+      result = qeSeq.exportFramePNG(ticks, outputPath);
+    }
+
+    if (result === false) {
+      return {
+        ok: false,
+        error: capability.method + " returned false",
+        capability: capability
+      };
+    }
+
+    return {
+      ok: true,
+      method: capability.method,
+      capability: capability
+    };
+  } catch(e3) {
+    return {
+      ok: false,
+      error: "Frame capture failed via " + capability.method + ": " + e3.toString(),
+      capability: capability
+    };
+  }
+}
+`;
+
 export function getExportTools(bridgeOptions: BridgeOptions) {
   return {
     get_export_capabilities: {
@@ -29,6 +127,7 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
       parameters: {},
       handler: async () => {
         const script = buildToolScript(`
+          ${FRAME_CAPTURE_HELPERS}
           var seq = app.project.activeSequence;
           var encoder = app.encoder;
           var sequence = {
@@ -36,14 +135,26 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
             exportAsMediaDirect: false,
             exportAsFinalCutProXML: false,
             getExportFileExtension: false,
-            exportAsProject: false
+            exportAsProject: false,
+            exportFramePNG: false
           };
           if (seq) {
             sequence.exportAsMediaDirect = typeof seq.exportAsMediaDirect === "function";
             sequence.exportAsFinalCutProXML = typeof seq.exportAsFinalCutProXML === "function";
             sequence.getExportFileExtension = typeof seq.getExportFileExtension === "function";
             sequence.exportAsProject = typeof seq.exportAsProject === "function";
+            sequence.exportFramePNG = typeof seq.exportFramePNG === "function";
           }
+          var frameCapture = seq ? __mcpGetFrameCaptureCapability(seq) : {
+            supported: false,
+            method: null,
+            requiresQe: false,
+            standardSequenceExportFramePNG: false,
+            qeSequenceExportFramePNG: false,
+            qeEnabledForProbe: false,
+            unsupportedReason: "No active sequence",
+            probeErrors: []
+          };
 
           return __result({
             readOnly: true,
@@ -67,9 +178,11 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
               exportOMF: typeof app.project.exportOMF === "function",
               exportFinalCutProXML: typeof app.project.exportFinalCutProXML === "function"
             },
+            frameCapture: frameCapture,
             limitations: [
               "Premiere ExtendScript can enqueue AME jobs but does not expose detailed queue progress/status.",
               "AME availability depends on the local Premiere/AME installation and version.",
+              "Frame capture is only reported as supported when Sequence.exportFramePNG or QE active sequence exportFramePNG is present.",
               "Interchange export behavior should be live-tested on disposable projects before production use."
             ]
           });
@@ -199,6 +312,7 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
       },
       handler: async (args: { output_path: string; time_seconds?: number }) => {
         const script = buildToolScript(`
+          ${FRAME_CAPTURE_HELPERS}
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
           
@@ -208,9 +322,15 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           }
           
           var outputPath = "${escapeForExtendScript(args.output_path)}";
-          seq.exportFramePNG(seq.getPlayerPosition().ticks, outputPath);
+          var captureResult = __mcpExportFramePng(seq, seq.getPlayerPosition().ticks, outputPath);
+          if (!captureResult.ok) return __error(captureResult.error);
           
-          return __result({ exported: true, outputPath: outputPath });
+          return __result({
+            exported: true,
+            outputPath: outputPath,
+            method: captureResult.method,
+            capability: captureResult.capability
+          });
         `);
         return sendCommand(script, bridgeOptions);
       },
@@ -449,6 +569,7 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
         const escapedPath = escapeForExtendScript(tempPath);
 
         const script = buildToolScript(`
+          ${FRAME_CAPTURE_HELPERS}
           var seq = app.project.activeSequence;
           if (!seq) return __error("No active sequence");
           
@@ -458,9 +579,15 @@ export function getExportTools(bridgeOptions: BridgeOptions) {
           }
           
           var outputPath = "${escapedPath}";
-          seq.exportFramePNG(seq.getPlayerPosition().ticks, outputPath);
+          var captureResult = __mcpExportFramePng(seq, seq.getPlayerPosition().ticks, outputPath);
+          if (!captureResult.ok) return __error(captureResult.error);
           
-          return __result({ exported: true, outputPath: outputPath });
+          return __result({
+            exported: true,
+            outputPath: outputPath,
+            method: captureResult.method,
+            capability: captureResult.capability
+          });
         `);
 
         const result = await sendCommand(script, bridgeOptions);

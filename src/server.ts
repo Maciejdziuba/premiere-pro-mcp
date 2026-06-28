@@ -76,7 +76,7 @@ BINS & ORGANIZATION:
 
 EXPORT:
 - Use export_sequence for AME-based encoding with presets.
-- Use export_frame to capture a single frame as an image.
+- Use get_export_capabilities before frame capture; export_frame/capture_frame report unsupported if Premiere exposes no frame-export API.
 - Use start_batch_encode to begin rendering all queued items.
 
 ERROR HANDLING:

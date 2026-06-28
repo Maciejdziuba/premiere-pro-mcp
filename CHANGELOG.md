@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Expanded the captions module to **13 tools** with local Adobe transcript JSON validation/conversion helpers, CEP/UXP capability diagnostics, and explicit unsupported Text panel/Speech-to-Text tools.
+- Added caption-like PNG text overlay tooling for styled bottom text that is explicitly separate from real Premiere caption tracks.
+
+### Changed
+
+- Updated catalog validation, diagnostics labels, and public metadata for **297 tools** across **28 modules**.
+- Preserved runtime wrapper fixes for Auto Reframe, sequence in/out and work-area timing, and guarded frame-capture capability reporting.
+
 ## [1.0.0] - 2025-02-26
 
 ### Added
@@ -43,6 +55,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **utility** (29) — Batch rename, enable/disable, project analysis, navigation
 - **health** (1) — Connectivity ping
 - **workspace** (2) — Get/set workspace layouts
-- **captions** (5) — SRT helpers, caption import, and caption tracks
+- **captions** (13) — SRT helpers, transcript JSON helpers, caption import, capability diagnostics, and caption tracks
 - **playback** (4) — Timeline and source monitor playback control
 - **project-manager** (1) — Project consolidation and transfer

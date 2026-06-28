@@ -6,7 +6,7 @@ Current source of truth:
 
 - `src/server.ts` registers tools by spreading 28 `get*Tools()` modules.
 - `tests/tools/tool-modules.test.ts` and `npm run validate:tools` validate the catalog.
-- After Agents D, E, and F, the implementation exposes 288 tools across 28 modules, matching README/package metadata.
+- After the captions/Text panel and caption-like overlay updates, the implementation exposes 297 tools across 28 modules, matching README/package metadata.
 
 ## Current module inventory
 
@@ -14,11 +14,11 @@ Current source of truth:
 |---|---:|---|---|---|
 | `src/tools/advanced.ts` | 27 | QE timeline edits, speed, sequence utilities, selected effect/color helpers | C, with D/F coordination | Mixed file; coordinate before touching color/effect/export helpers. |
 | `src/tools/audio.ts` | 10 | Dedicated audio levels/gain, fades, pan, keyframes, common effects, audio transitions, diagnostics, ducking, mute | E | Uses shared helper lookup for Volume/Level, QE helpers for audio effects/transitions, and honest errors for unsupported raw peak/normalization APIs. |
-| `src/tools/captions.ts` | 5 | Caption/SRT helpers and caption track creation | F | Local SRT parse/write does not require Premiere; caption edit/export API exposure still needs live validation. |
+| `src/tools/captions.ts` | 13 | Caption sidecars, Adobe transcript JSON helpers, capability diagnostics, and explicit UXP-required unsupported Text panel tools | F | Local SRT/transcript JSON parse/write/convert does not require Premiere; CEP can import sidecar caption files and may create caption tracks with `Sequence.createCaptionTrack`; Text panel transcript import/export and auto-transcribe are UXP/UI-only from this bridge and return explicit unsupported errors. |
 | `src/tools/clipboard.ts` | 8 | Effect copy, Lumetri grade copy/paste, batch effects, clip media replace, blend mode | F, with D for color-grade behavior | Lumetri grade tools use helper lookup; generic effect copy still needs broader migration. |
 | `src/tools/discovery.ts` | 10 | Project, item, sequence, clip discovery | G | Read-oriented foundation for safe planning. |
 | `src/tools/effects.ts` | 9 | Video/audio effects, fuller Lumetri controls, LUT, batch color, stabilization | F, with D owning Lumetri/color | Highest D/F overlap; optional Lumetri Creative/Vignette controls need live validation. |
-| `src/tools/export.ts` | 16 | Export, frame capture, interchange, AME/proxy operations, export diagnostics, batch export helpers | F | Queue details remain limited by AME/Premiere scripting APIs; needs live AME/Premiere validation beyond unit tests. |
+| `src/tools/export.ts` | 16 | Export, frame capture, interchange, AME/proxy operations, export diagnostics, batch export helpers | F | Queue details remain limited by AME/Premiere scripting APIs; frame capture now reports Sequence/QE capability and returns unsupported when no safe API is present. |
 | `src/tools/health.ts` | 4 | Fork ping, bridge diagnostics, live health/runtime diagnostics | G | `fork_ping` and `bridge_diagnostics` do not contact Premiere; `ping` and runtime diagnostics do. |
 | `src/tools/inspection.ts` | 10 | Deep read-only project/sequence/clip reports | G | Used by safe runtime sweep. |
 | `src/tools/keyframes.ts` | 8 | Effect property and keyframe CRUD | D, with B helper dependency | Property lookup should migrate to shared helpers. |
@@ -26,14 +26,14 @@ Current source of truth:
 | `src/tools/media.ts` | 16 | Import, bins, relink, proxy, interpretation | F | Project-panel destructive tools need clear live-test boundaries. |
 | `src/tools/metadata.ts` | 9 | Metadata, labels, XMP, footage interpretation, color space | F/G | Data mutation is F; reporting is G. |
 | `src/tools/playback.ts` | 4 | Timeline/source playback | C | Uses QE for timeline playback. |
-| `src/tools/playhead.ts` | 6 | CTI, work area, sequence in/out | C | Shared by editing and export workflows. |
+| `src/tools/playhead.ts` | 6 | CTI, work area, sequence in/out | C | Shared by editing and export workflows; sequence in/out and work-area wrappers use Premiere's seconds-based APIs, while CTI still uses ticks. |
 | `src/tools/project-manager.ts` | 1 | Consolidate/transfer | F | High-risk live operation; disposable projects only. |
 | `src/tools/project.ts` | 25 | Project lifecycle, bins, ingest, import, scratch disks | F/G | Several operations affect files/project state. |
 | `src/tools/scripting.ts` | 6 | Custom ExtendScript, DOM inspection, state snapshots | G, with B safety constraints | Raw script paths stay explicit opt-in. |
 | `src/tools/selection.ts` | 7 | Clip selection utilities | C | Selection state is mutable; re-query after edits. |
-| `src/tools/sequence.ts` | 11 | Sequence creation/settings/nesting/interchange helpers | C/F | C owns timeline behavior; F owns export-facing helpers. |
+| `src/tools/sequence.ts` | 11 | Sequence creation/settings/nesting/interchange helpers | C/F | C owns timeline behavior; F owns export-facing helpers; Auto Reframe reduces target dimensions to Premiere's numerator/denominator signature and returns the generated sequence. |
 | `src/tools/source-monitor.ts` | 7 | Source monitor and 3-point edits | C | Depends on target-track behavior. |
-| `src/tools/text.ts` | 3 | Text overlays and MOGRT import | F | Graphics/MOGRT properties may need helper lookup. |
+| `src/tools/text.ts` | 4 | Text overlays, caption-like PNG overlays, and MOGRT import | F | Styled caption-like overlays are imported PNG graphics, not real caption-track items. MOGRT properties may need helper lookup. |
 | `src/tools/timeline.ts` | 10 | Add/remove/move/trim/split/duplicate/enable/replace/speed | C | Core editing surface. |
 | `src/tools/track-targeting.ts` | 31 | Track targeting, clip transforms/audio props, batch operations, version info | C, with D/E/G coordination | Largest mixed module; Motion/Opacity/Volume lookup should use B helpers. |
 | `src/tools/tracks.ts` | 4 | Track add/delete/lock/visibility | C | Track delete/visibility should keep explicit errors. |
@@ -41,19 +41,35 @@ Current source of truth:
 | `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer better-owned modules for new broad features. |
 | `src/tools/workspace.ts` | 2 | Workspace list/switch | G | Diagnostics/workflow support. |
 
-Total: 288 tools across 28 modules.
+Total: 297 tools across 28 modules.
 
 ## Missing target categories
 
 | Target | Desired result | Primary owner | Current gap/status |
 |---|---|---|---|
 | Locale-resilient component/property lookup | Shared helpers that match by `matchName` first, localized display name second, including nested property groups | B | Added in `src/bridge/script-builder.ts` and documented in `LOCALE_HELPERS.md`; C/D/E/F should migrate tools to use it. |
-| Timeline/sequence breadth | Safer add/move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists; QE/index-based operations need clearer failure modes and live notes. |
+| Timeline/sequence breadth | Safer add/move/trim/split/duplicate/link/ripple/gap/work-area/in-out/track flows with re-query guidance | C | Broad coverage exists; sequence in/out and work-area wrappers now use seconds-based APIs with regression coverage; QE/index-based operations need clearer failure modes and live notes. |
 | Lumetri/color breadth | Fuller Lumetri controls, LUT handling, grade copy/paste, batch color application | D | Added `batch_color_correct`, `copy_lumetri_grade`, and `paste_lumetri_grade`; expanded `color_correct`/`apply_lut`; migrated color/keyframe lookup to shared helpers where feasible. Optional Creative/Vignette aliases need live Premiere validation. |
 | Audio breadth | Clip gain/volume/fades/pan/keyframes, audio effects, audio transitions, normalization/diagnostics where feasible | E | Dedicated `audio.ts` now covers feasible clip Volume/Level gain offsets, fades, pan, keyframes, common QE audio effects, QE audio transitions, timeline-level clipping/normalization diagnostics, and voiceover ducking. Raw waveform peak, LUFS, and destructive normalization remain unsupported through ExtendScript and return explicit diagnostics instead of fake success. |
-| Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, caption edit/export, AME/export diagnostics | F | Transition lookup uses helper matchName/name resolution; batch video transitions report per-cut results; local SRT parse/write and caption import/capability diagnostics added; export preset/capability diagnostics and batch AME/interchange helpers added. Live AME/caption/interchange validation remains outstanding. |
+| Effects/transitions/captions/export breadth | Match-name-aware effect lookup, safer batch effects/transitions, truthful caption/transcript diagnostics, caption-like overlays, AME/export diagnostics | F | Transition lookup uses helper matchName/name resolution; batch video transitions report per-cut results; local SRT parse/write, Adobe transcript JSON parse/write/convert, caption sidecar import, `Sequence.createCaptionTrack` capability diagnostics, styled caption-like PNG overlays, and explicit UXP-required Text panel unsupported errors are implemented. Export preset/capability diagnostics, honest frame-capture capability reporting, and batch AME/interchange helpers added. Live AME/caption/interchange validation remains outstanding. |
 | Diagnostics/testing/docs | Bridge/version/locale readouts, safe read-only runtime sweep, schema validation, live-test notes | G | Added `bridge_diagnostics`, `get_premiere_runtime_diagnostics`, `validate:tools`, and `diagnostics:sweep`. |
 | Architecture map | Keep counts, ownership, helper assignments, and conflict boundaries current | A | This file is the coordination point; update it when tools/modules are added. |
+
+## Caption and transcript support
+
+Current reliable paths:
+
+- Local SRT helpers: parse/write normalized captions without Premiere.
+- Local Adobe transcript JSON helpers: parse/write the public transcript shape and convert SRT to/from transcript JSON without Premiere.
+- CEP/ExtendScript sidecar import: import `.srt`, `.vtt`, `.scc`, `.mcc`, and `.stl` files into the project.
+- Caption track creation: call `Sequence.createCaptionTrack(projectItem, startTime, captionFormat)` only when the live ExtendScript runtime exposes it and an imported caption ProjectItem is supplied.
+- Capability diagnostics: report the current bridge as CEP/ExtendScript, list the UXP transcript APIs Adobe exposes, and mark that this bridge cannot invoke them.
+
+Unsupported from this bridge:
+
+- Text panel transcript import/export on clips. Adobe exposes this through UXP (`Transcript.importFromJSON`, `TextSegments.importFromJSON`, `Transcript.exportToJSON`, and `Transcript.createImportTextSegmentsAction`), not through CEP `evalScript()`.
+- Speech-to-Text auto transcription. No public CEP/ExtendScript API is available, so `auto_transcribe_sequence` returns an explicit unsupported error.
+- Style/readback for generated caption tracks. SRT sidecar import plus `createCaptionTrack` can create sequence captions, but ExtendScript does not provide a reliable Text panel transcript/caption style readback surface.
 
 ## Helper workstreams
 
@@ -84,6 +100,7 @@ Remaining live validation:
 - Run `npm run diagnostics:sweep -- --include-project` on a small known project.
 - Capture at least one non-English Premiere UI locale.
 - Confirm `bridge_diagnostics` reports stale `cmd_`/`res_` files after a forced bridge interruption, then verify cleanup on restart.
+- Live-check sequence in/out and work-area seconds behavior on a disposable sequence, Auto Reframe sequence creation for a 9:16 target, and `capture_frame` capability reporting on runtimes with and without QE `exportFramePNG`.
 - Live-check audio automation on a disposable sequence: Volume/Level keyframe time basis, Panner exposure on mono/stereo clips, QE common audio effect lookup, QE audio transition insertion, and voiceover ducking keyframe placement.
 
 ## Safe extension patterns

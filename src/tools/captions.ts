@@ -9,6 +9,44 @@ interface NormalizedSrtCaption {
   text: string;
 }
 
+interface TranscriptWord {
+  confidence: number;
+  duration: number;
+  eos: boolean;
+  start: number;
+  tags: string[];
+  text: string;
+  type: "word" | "punctuation";
+}
+
+interface TranscriptSegment {
+  duration: number;
+  language: string;
+  speaker: string;
+  start: number;
+  words: TranscriptWord[];
+}
+
+interface TranscriptSpeaker {
+  id: string;
+  name: string;
+}
+
+interface AdobeTranscript {
+  language: string;
+  segments: TranscriptSegment[];
+  speakers: TranscriptSpeaker[];
+}
+
+const ADOBE_TRANSCRIPT_SCHEMA_ID = "https://schemas.adobe.com/transcript/v1.0.0";
+const DEFAULT_SPEAKER_ID = "00000000-0000-4000-8000-000000000001";
+const SUPPORTED_TRANSCRIPT_LANGUAGES = [
+  "en-us", "en-gb", "zh-hk", "cmn-hans", "cmn-hant", "es-es", "de-de",
+  "fr-fr", "ja-jp", "pt-pt", "pt-br", "ko-kr", "it-it", "ru-ru", "hi-in",
+  "nb-no", "sv-se", "nl-nl", "da-dk", "id-id", "th-th", "vi-vn", "ms-my",
+  "tr-tr", "pl-pl", "fil-ph", "te-in", "ml-in", "pa-in", "??-??",
+];
+
 function parseSrtTime(value: string): number {
   const match = value.trim().match(/^(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})$/);
   if (!match) {
@@ -121,6 +159,234 @@ function renderSrt(captions: unknown[]): string {
     .join("\n\n") + "\n";
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function requireNumber(value: unknown, path: string, min = 0): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min) {
+    throw new Error(`${path} must be a finite number >= ${min}`);
+  }
+  return value;
+}
+
+function requireString(value: unknown, path: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${path} must be a non-empty string`);
+  }
+  return value;
+}
+
+function validateLanguageCode(value: unknown, path: string): string {
+  const language = requireString(value, path).toLowerCase();
+  if (!SUPPORTED_TRANSCRIPT_LANGUAGES.includes(language)) {
+    throw new Error(`${path} must be a Premiere transcript language code`);
+  }
+  return language;
+}
+
+function validateUuid(value: unknown, path: string): string {
+  const text = requireString(value, path);
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text)) {
+    throw new Error(`${path} must be a UUID`);
+  }
+  return text;
+}
+
+function normalizeTranscriptJson(value: unknown): AdobeTranscript {
+  if (!isPlainObject(value)) {
+    throw new Error("transcript must be an object");
+  }
+
+  const language = validateLanguageCode(value.language, "transcript.language");
+
+  if (!Array.isArray(value.speakers) || value.speakers.length === 0) {
+    throw new Error("transcript.speakers must be a non-empty array");
+  }
+  const speakers = value.speakers.map((speaker, speakerIndex) => {
+    if (!isPlainObject(speaker)) {
+      throw new Error(`transcript.speakers[${speakerIndex}] must be an object`);
+    }
+    return {
+      id: validateUuid(speaker.id, `transcript.speakers[${speakerIndex}].id`),
+      name: requireString(speaker.name, `transcript.speakers[${speakerIndex}].name`),
+    };
+  });
+  const speakerIds = new Set(speakers.map((speaker) => speaker.id));
+
+  if (!Array.isArray(value.segments) || value.segments.length === 0) {
+    throw new Error("transcript.segments must be a non-empty array");
+  }
+  const segments = value.segments.map((segment, segmentIndex) => {
+    if (!isPlainObject(segment)) {
+      throw new Error(`transcript.segments[${segmentIndex}] must be an object`);
+    }
+
+    const speaker = validateUuid(segment.speaker, `transcript.segments[${segmentIndex}].speaker`);
+    if (!speakerIds.has(speaker)) {
+      throw new Error(`transcript.segments[${segmentIndex}].speaker must reference transcript.speakers`);
+    }
+    if (!Array.isArray(segment.words) || segment.words.length === 0) {
+      throw new Error(`transcript.segments[${segmentIndex}].words must be a non-empty array`);
+    }
+
+    const words = segment.words.map((word, wordIndex) => {
+      if (!isPlainObject(word)) {
+        throw new Error(`transcript.segments[${segmentIndex}].words[${wordIndex}] must be an object`);
+      }
+      const confidence = requireNumber(
+        word.confidence,
+        `transcript.segments[${segmentIndex}].words[${wordIndex}].confidence`
+      );
+      if (confidence > 1) {
+        throw new Error(`transcript.segments[${segmentIndex}].words[${wordIndex}].confidence must be <= 1`);
+      }
+      const type = requireString(
+        word.type,
+        `transcript.segments[${segmentIndex}].words[${wordIndex}].type`
+      );
+      if (type !== "word" && type !== "punctuation") {
+        throw new Error(`transcript.segments[${segmentIndex}].words[${wordIndex}].type must be word or punctuation`);
+      }
+      const wordType: "word" | "punctuation" = type;
+      if (!Array.isArray(word.tags) || word.tags.some((tag) => typeof tag !== "string")) {
+        throw new Error(`transcript.segments[${segmentIndex}].words[${wordIndex}].tags must be an array of strings`);
+      }
+      const tags = word.tags as string[];
+      return {
+        confidence,
+        duration: requireNumber(
+          word.duration,
+          `transcript.segments[${segmentIndex}].words[${wordIndex}].duration`
+        ),
+        eos: typeof word.eos === "boolean" ? word.eos : false,
+        start: requireNumber(word.start, `transcript.segments[${segmentIndex}].words[${wordIndex}].start`),
+        tags,
+        text: requireString(word.text, `transcript.segments[${segmentIndex}].words[${wordIndex}].text`),
+        type: wordType,
+      };
+    });
+
+    return {
+      duration: requireNumber(segment.duration, `transcript.segments[${segmentIndex}].duration`),
+      language: validateLanguageCode(segment.language, `transcript.segments[${segmentIndex}].language`),
+      speaker,
+      start: requireNumber(segment.start, `transcript.segments[${segmentIndex}].start`),
+      words,
+    };
+  });
+
+  return { language, segments, speakers };
+}
+
+function summarizeTranscript(transcript: AdobeTranscript) {
+  const durationSeconds = transcript.segments.reduce((max, segment) => {
+    return Math.max(max, segment.start + segment.duration);
+  }, 0);
+  const wordCount = transcript.segments.reduce((sum, segment) => sum + segment.words.length, 0);
+  return {
+    schema: ADOBE_TRANSCRIPT_SCHEMA_ID,
+    language: transcript.language,
+    segmentCount: transcript.segments.length,
+    wordCount,
+    speakerCount: transcript.speakers.length,
+    durationSeconds,
+  };
+}
+
+function segmentText(words: TranscriptWord[]): string {
+  let text = "";
+  for (const word of words) {
+    if (!text || word.type === "punctuation" || /^[,.;:!?)]/.test(word.text)) {
+      text += word.text;
+    } else {
+      text += " " + word.text;
+    }
+  }
+  return text.trim();
+}
+
+function transcriptToSrtCaptions(transcript: AdobeTranscript): NormalizedSrtCaption[] {
+  return transcript.segments.map((segment, index) => {
+    const endSeconds = segment.start + segment.duration;
+    if (endSeconds <= segment.start) {
+      throw new Error(`Transcript segment ${index + 1} must end after it starts`);
+    }
+    return {
+      index: index + 1,
+      startSeconds: segment.start,
+      endSeconds,
+      text: segmentText(segment.words),
+    };
+  });
+}
+
+function srtCaptionsToTranscript(
+  captions: NormalizedSrtCaption[],
+  language: string,
+  speakerName: string,
+  speakerId: string
+): AdobeTranscript {
+  const normalizedLanguage = validateLanguageCode(language, "language");
+  const normalizedSpeakerId = validateUuid(speakerId, "speaker_id");
+  const normalizedSpeakerName = requireString(speakerName, "speaker_name");
+
+  const segments = captions.map((caption) => {
+    const tokens = caption.text.replace(/\s+/g, " ").trim().split(" ");
+    const duration = caption.endSeconds - caption.startSeconds;
+    var cursor = caption.startSeconds;
+    const wordDuration = duration / Math.max(tokens.length, 1);
+    const words = tokens.map((token, tokenIndex) => {
+      const isLast = tokenIndex === tokens.length - 1;
+      const item = {
+        confidence: 1,
+        duration: wordDuration,
+        eos: isLast,
+        start: cursor,
+        tags: [],
+        text: token,
+        type: "word" as const,
+      };
+      cursor += wordDuration;
+      return item;
+    });
+
+    return {
+      duration,
+      language: normalizedLanguage,
+      speaker: normalizedSpeakerId,
+      start: caption.startSeconds,
+      words,
+    };
+  });
+
+  return {
+    language: normalizedLanguage,
+    segments,
+    speakers: [{ id: normalizedSpeakerId, name: normalizedSpeakerName }],
+  };
+}
+
+function readTranscriptJsonFile(filePath: string): AdobeTranscript {
+  if (!existsSync(filePath)) {
+    throw new Error(`Transcript JSON file not found: ${filePath}`);
+  }
+  const parsed = JSON.parse(readFileSync(filePath, "utf-8"));
+  return normalizeTranscriptJson(parsed);
+}
+
+function unsupportedTextPanelResult(operation: string) {
+  return {
+    success: false,
+    error:
+      `${operation} is not available through this MCP server's CEP/ExtendScript bridge. ` +
+      "Premiere Pro 25+ exposes Text panel transcript import/export through UXP " +
+      "(`premierepro`.Transcript.importFromJSON/exportToJSON/createImportTextSegmentsAction), " +
+      "but CEP evalScript cannot call UXP modules and Adobe has not exposed Speech-to-Text auto-transcribe " +
+      "or Text panel transcript import/export in ExtendScript.",
+  };
+}
+
 export function getCaptionTools(bridgeOptions: BridgeOptions) {
   return {
     parse_srt_file: {
@@ -224,6 +490,230 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
       },
     },
 
+    parse_transcript_json_file: {
+      description:
+        "Parse and validate a local Adobe Text panel transcript JSON file without contacting Premiere.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          file_path: {
+            type: "string",
+            description: "Full path to an Adobe transcript JSON file.",
+          },
+        },
+        required: ["file_path"],
+      },
+      handler: async (args: { file_path: string }) => {
+        try {
+          const transcript = readTranscriptJsonFile(args.file_path);
+          return {
+            success: true,
+            data: {
+              ...summarizeTranscript(transcript),
+              transcript,
+              requiresPremiere: false,
+              requiresCepBridge: false,
+            },
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    },
+
+    write_transcript_json_file: {
+      description:
+        "Validate and write an Adobe Text panel transcript JSON file without contacting Premiere.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          output_path: {
+            type: "string",
+            description: "Full path where the transcript JSON should be written.",
+          },
+          transcript: {
+            type: "object",
+            description:
+              "Adobe transcript JSON object with language, speakers, segments, and timed words.",
+          },
+          overwrite: {
+            type: "boolean",
+            description: "Overwrite an existing file (default: false).",
+          },
+        },
+        required: ["output_path", "transcript"],
+      },
+      handler: async (args: { output_path: string; transcript: unknown; overwrite?: boolean }) => {
+        if (existsSync(args.output_path) && !args.overwrite) {
+          return {
+            success: false,
+            error: `Output file already exists: ${args.output_path}. Pass overwrite=true to replace it.`,
+          };
+        }
+
+        try {
+          const transcript = normalizeTranscriptJson(args.transcript);
+          writeFileSync(args.output_path, JSON.stringify(transcript, null, 2) + "\n", "utf-8");
+          return {
+            success: true,
+            data: {
+              written: true,
+              outputPath: args.output_path,
+              ...summarizeTranscript(transcript),
+              requiresPremiere: false,
+              requiresCepBridge: false,
+            },
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    },
+
+    convert_srt_to_transcript_json_file: {
+      description:
+        "Convert a local SRT file to Adobe Text panel transcript JSON without contacting Premiere.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          srt_path: {
+            type: "string",
+            description: "Full path to the source .srt file.",
+          },
+          output_path: {
+            type: "string",
+            description: "Full path where the transcript JSON should be written.",
+          },
+          language: {
+            type: "string",
+            description: "Premiere transcript language code (default: en-us).",
+          },
+          speaker_name: {
+            type: "string",
+            description: "Speaker display name for generated transcript segments (default: Speaker 1).",
+          },
+          speaker_id: {
+            type: "string",
+            description: "UUID speaker id (default: deterministic generated id).",
+          },
+          overwrite: {
+            type: "boolean",
+            description: "Overwrite an existing file (default: false).",
+          },
+        },
+        required: ["srt_path", "output_path"],
+      },
+      handler: async (args: {
+        srt_path: string;
+        output_path: string;
+        language?: string;
+        speaker_name?: string;
+        speaker_id?: string;
+        overwrite?: boolean;
+      }) => {
+        if (!existsSync(args.srt_path)) {
+          return { success: false, error: `SRT file not found: ${args.srt_path}` };
+        }
+        if (existsSync(args.output_path) && !args.overwrite) {
+          return {
+            success: false,
+            error: `Output file already exists: ${args.output_path}. Pass overwrite=true to replace it.`,
+          };
+        }
+
+        try {
+          const captions = parseSrt(readFileSync(args.srt_path, "utf-8"));
+          if (captions.length === 0) {
+            return { success: false, error: "SRT file contains no captions" };
+          }
+          const transcript = srtCaptionsToTranscript(
+            captions,
+            args.language || "en-us",
+            args.speaker_name || "Speaker 1",
+            args.speaker_id || DEFAULT_SPEAKER_ID
+          );
+          writeFileSync(args.output_path, JSON.stringify(transcript, null, 2) + "\n", "utf-8");
+          return {
+            success: true,
+            data: {
+              converted: true,
+              sourcePath: args.srt_path,
+              outputPath: args.output_path,
+              captionCount: captions.length,
+              ...summarizeTranscript(transcript),
+              requiresPremiere: false,
+              requiresCepBridge: false,
+            },
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    },
+
+    export_transcript_json_to_srt_file: {
+      description:
+        "Convert a local Adobe Text panel transcript JSON file to SRT without contacting Premiere.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          transcript_path: {
+            type: "string",
+            description: "Full path to an Adobe transcript JSON file.",
+          },
+          output_path: {
+            type: "string",
+            description: "Full path where the .srt file should be written.",
+          },
+          overwrite: {
+            type: "boolean",
+            description: "Overwrite an existing file (default: false).",
+          },
+        },
+        required: ["transcript_path", "output_path"],
+      },
+      handler: async (args: { transcript_path: string; output_path: string; overwrite?: boolean }) => {
+        if (existsSync(args.output_path) && !args.overwrite) {
+          return {
+            success: false,
+            error: `Output file already exists: ${args.output_path}. Pass overwrite=true to replace it.`,
+          };
+        }
+
+        try {
+          const transcript = readTranscriptJsonFile(args.transcript_path);
+          const captions = transcriptToSrtCaptions(transcript);
+          writeFileSync(args.output_path, renderSrt(captions), "utf-8");
+          return {
+            success: true,
+            data: {
+              converted: true,
+              sourcePath: args.transcript_path,
+              outputPath: args.output_path,
+              captionCount: captions.length,
+              ...summarizeTranscript(transcript),
+              requiresPremiere: false,
+              requiresCepBridge: false,
+            },
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      },
+    },
+
     import_caption_file: {
       description:
         "Import a local caption sidecar file (.srt, .vtt, .scc, .mcc, .stl) into the project.",
@@ -290,7 +780,7 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
 
     get_caption_api_capabilities: {
       description:
-        "Report caption-related Premiere ExtendScript APIs exposed by the current runtime without editing the project.",
+        "Report caption and transcript APIs exposed by this CEP/ExtendScript bridge without editing the project.",
       parameters: {},
       handler: async () => {
         const script = buildToolScript(`
@@ -312,11 +802,31 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
 
           return __result({
             readOnly: true,
+            bridge: {
+              kind: "CEP/ExtendScript",
+              canExecuteExtendScript: true,
+              canExecuteUxpPremiereProModule: false
+            },
             sequence: sequenceCapabilities,
+            textPanelTranscript: {
+              extendScriptImportExport: false,
+              extendScriptAutoTranscribe: false,
+              uxpPremiere25PlusApis: [
+                "Transcript.hasTranscript(clipProjectItem)",
+                "Transcript.exportToJSON(clipProjectItem)",
+                "Transcript.importFromJSON(json)",
+                "Transcript.createImportTextSegmentsAction(textSegments, clipProjectItem)",
+                "Transcript.querySupportedLanguages()"
+              ],
+              currentBridgeCanInvokeUxpApis: false
+            },
             supportedSidecarImports: [".srt", ".vtt", ".scc", ".mcc", ".stl"],
+            supportedLocalTranscriptJsonSchema: "${ADOBE_TRANSCRIPT_SCHEMA_ID}",
             limitations: [
               "Caption track creation requires an imported caption ProjectItem.",
-              "Caption edit/export methods are version-dependent and may not be exposed through ExtendScript."
+              "The Text panel transcript APIs are exposed in Premiere Pro UXP, not through CEP evalScript/ExtendScript.",
+              "Adobe has not exposed Speech-to-Text auto-transcribe as a public ExtendScript or CEP API.",
+              "This MCP server can prepare/validate Adobe transcript JSON locally and can import sidecar caption files through ExtendScript, but cannot attach/read Text panel transcripts without a UXP bridge."
             ]
           });
         `);
@@ -324,9 +834,100 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
       },
     },
 
+    import_text_panel_transcript: {
+      description:
+        "Unsupported in this CEP bridge: import Adobe Text panel transcript JSON into a selected clip requires Premiere UXP.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          transcript_path: {
+            type: "string",
+            description: "Full path to Adobe transcript JSON that a UXP implementation would import.",
+          },
+          clip_project_item_id: {
+            type: "string",
+            description: "Project item node ID or name of the target clip.",
+          },
+        },
+        required: ["transcript_path", "clip_project_item_id"],
+      },
+      handler: async (args: { transcript_path: string; clip_project_item_id: string }) => {
+        try {
+          readTranscriptJsonFile(args.transcript_path);
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+        return unsupportedTextPanelResult(
+          `Importing Text panel transcript JSON for clip ${args.clip_project_item_id}`
+        );
+      },
+    },
+
+    export_text_panel_transcript: {
+      description:
+        "Unsupported in this CEP bridge: export a clip's Text panel transcript JSON requires Premiere UXP.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          clip_project_item_id: {
+            type: "string",
+            description: "Project item node ID or name of the clip whose Text panel transcript should be exported.",
+          },
+          output_path: {
+            type: "string",
+            description: "Full path where a UXP implementation would write transcript JSON.",
+          },
+        },
+        required: ["clip_project_item_id", "output_path"],
+      },
+      handler: async () => unsupportedTextPanelResult("Exporting Text panel transcript JSON"),
+    },
+
+    create_captions_from_text_panel_transcript: {
+      description:
+        "Unsupported in this CEP bridge: creating captions directly from Text panel transcript requires Premiere UXP/UI automation.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          clip_project_item_id: {
+            type: "string",
+            description: "Project item node ID or name of the clip with a Text panel transcript.",
+          },
+          start_seconds: {
+            type: "number",
+            description: "Sequence offset where captions would start.",
+          },
+        },
+        required: ["clip_project_item_id"],
+      },
+      handler: async () => unsupportedTextPanelResult("Creating captions from a Text panel transcript"),
+    },
+
+    auto_transcribe_sequence: {
+      description:
+        "Unsupported: Premiere Speech-to-Text auto transcription is not exposed as a public CEP/ExtendScript MCP API.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          sequence_id: {
+            type: "string",
+            description: "Optional sequence ID/name that would be transcribed if Adobe exposed a scriptable API.",
+          },
+          language: {
+            type: "string",
+            description: "Requested transcription language code.",
+          },
+        },
+      },
+      handler: async () => unsupportedTextPanelResult("Speech-to-Text auto transcription"),
+    },
+
     create_caption_track: {
       description:
-        "Create a caption/subtitle track in the active sequence from an imported caption file (e.g., .srt, .vtt)",
+        "Create a caption/subtitle track in the active sequence from an imported caption sidecar ProjectItem.",
       parameters: {
         type: "object" as const,
         properties: {

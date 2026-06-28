@@ -1,6 +1,31 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
 
+function gcd(a: number, b: number): number {
+  let x = Math.abs(Math.round(a));
+  let y = Math.abs(Math.round(b));
+  while (y !== 0) {
+    const next = x % y;
+    x = y;
+    y = next;
+  }
+  return x || 1;
+}
+
+function reduceAspectRatio(width: number, height: number): { numerator: number; denominator: number } {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new Error("target_width and target_height must be positive numbers");
+  }
+
+  const roundedWidth = Math.round(width);
+  const roundedHeight = Math.round(height);
+  const divisor = gcd(roundedWidth, roundedHeight);
+  return {
+    numerator: roundedWidth / divisor,
+    denominator: roundedHeight / divisor,
+  };
+}
+
 export function getSequenceTools(bridgeOptions: BridgeOptions) {
   return {
     create_sequence: {
@@ -158,7 +183,7 @@ export function getSequenceTools(bridgeOptions: BridgeOptions) {
     },
 
     auto_reframe_sequence: {
-      description: "Auto-reframe a sequence for a different aspect ratio",
+      description: "Auto-reframe a sequence for a different aspect ratio. target_width/target_height are reduced to the numerator/denominator expected by Premiere.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -174,18 +199,73 @@ export function getSequenceTools(bridgeOptions: BridgeOptions) {
             type: "number",
             description: "Target frame height in pixels",
           },
+          motion_preset: {
+            type: "string",
+            enum: ["slower", "default", "faster"],
+            description: "Auto Reframe motion tracking preset: slower=more accurate, default=balanced, faster=less analysis. Defaults to default.",
+          },
+          new_sequence_name: {
+            type: "string",
+            description: "Name for the generated reframed sequence. Defaults to the source name plus the target aspect ratio.",
+          },
+          use_nested_sequences: {
+            type: "boolean",
+            description: "Whether Auto Reframe should process nested sequences (default: false).",
+          },
         },
         required: ["target_width", "target_height"],
       },
-      handler: async (args: { sequence_id?: string; target_width: number; target_height: number }) => {
+      handler: async (args: {
+        sequence_id?: string;
+        target_width: number;
+        target_height: number;
+        motion_preset?: "slower" | "default" | "faster";
+        new_sequence_name?: string;
+        use_nested_sequences?: boolean;
+      }) => {
+        let ratio: { numerator: number; denominator: number };
+        try {
+          ratio = reduceAspectRatio(args.target_width, args.target_height);
+        } catch (error) {
+          return { success: false, error: error instanceof Error ? error.message : String(error) };
+        }
+
         const seqLookup = args.sequence_id
           ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}"); if (!seq) return __error("Sequence not found");`
           : `var seq = app.project.activeSequence; if (!seq) return __error("No active sequence");`;
+        const motionPresetMap = {
+          slower: "slower",
+          default: "default",
+          faster: "faster",
+        } as const;
+        const motionPreset = motionPresetMap[args.motion_preset ?? "default"];
+        const defaultNameSuffix = `${ratio.numerator}x${ratio.denominator}`;
+        const newSequenceName = args.new_sequence_name
+          ? escapeForExtendScript(args.new_sequence_name)
+          : `" + seq.name + " Auto Reframe ${defaultNameSuffix}`;
 
         const script = buildToolScript(`
           ${seqLookup}
-          seq.autoReframeSequence(${args.target_width}, ${args.target_height}, false);
-          return __result({ reframed: true, name: seq.name, targetSize: "${args.target_width}x${args.target_height}" });
+          if (typeof seq.autoReframeSequence !== "function") {
+            return __error("autoReframeSequence is not available in this Premiere ExtendScript runtime");
+          }
+          var numerator = ${ratio.numerator};
+          var denominator = ${ratio.denominator};
+          var motionPreset = "${motionPreset}";
+          var newSequenceName = "${newSequenceName}";
+          var useNestedSequences = ${args.use_nested_sequences ? "true" : "false"};
+          var newSeq = seq.autoReframeSequence(numerator, denominator, motionPreset, newSequenceName, useNestedSequences);
+          if (!newSeq) return __error("autoReframeSequence returned no sequence");
+          return __result({
+            reframed: true,
+            sourceName: seq.name,
+            name: newSeq.name,
+            id: newSeq.sequenceID,
+            aspectRatio: numerator + ":" + denominator,
+            targetSize: "${args.target_width}x${args.target_height}",
+            motionPreset: motionPreset,
+            useNestedSequences: useNestedSequences
+          });
         `);
         return sendCommand(script, bridgeOptions);
       },
