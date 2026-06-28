@@ -7,7 +7,7 @@ Current source of truth:
 - `src/server.ts` registers tools by spreading 28 `get*Tools()` modules.
 - `tests/tools/tool-modules.test.ts` and `npm run validate:tools` validate the catalog.
 - Hybrid transcript work uses one MCP server with two panels: `cep-plugin/` for ExtendScript/QE tools and optional `uxp-panel/` for Premiere UXP Text panel transcript status/actions.
-- After the UXP sidecar transcript update, the implementation exposes 301 tools across 28 modules, matching README/package metadata.
+- After the native-caption inspection update, the implementation exposes 302 tools across 28 modules, matching README/package metadata.
 
 ## Current module inventory
 
@@ -42,7 +42,7 @@ Current source of truth:
 | `src/tools/utility.ts` | 29 | Project cleanup, adjustment layers, freeze frame, sequence settings, markers, navigation, nesting | C/G/F split | Mixed catch-all; prefer better-owned modules for new broad features. |
 | `src/tools/workspace.ts` | 2 | Workspace list/switch | G | Diagnostics/workflow support. |
 
-Total: 301 tools across 28 modules.
+Total: 302 tools across 28 modules.
 
 ## Missing target categories
 

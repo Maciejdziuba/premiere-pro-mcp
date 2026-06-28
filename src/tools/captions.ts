@@ -1234,6 +1234,11 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
       parameters: {
         type: "object" as const,
         properties: {
+          sequence_id: {
+            type: "string",
+            description:
+              "Optional sequence name or ID to receive the caption track. Uses the active sequence if omitted.",
+          },
           item_id: {
             type: "string",
             description:
@@ -1253,11 +1258,19 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
         required: ["item_id"],
       },
       handler: async (args: {
+        sequence_id?: string;
         item_id: string;
         start_seconds?: number;
         caption_format?: string;
       }) => {
         const startSeconds = args.start_seconds ?? 0;
+        if (!Number.isFinite(startSeconds) || startSeconds < 0) {
+          return {
+            success: false,
+            error: "start_seconds must be a finite number >= 0",
+          };
+        }
+
         const requestedFormat = args.caption_format || "subtitle";
         const formatMap: Record<string, string> = {
           subtitle: "Sequence.CAPTION_FORMAT_SUBTITLE",
@@ -1276,9 +1289,15 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
           };
         }
 
+        const seqLookup = args.sequence_id
+          ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}");
+             if (!seq) return __error("Sequence not found: ${escapeForExtendScript(args.sequence_id)}");
+             app.project.activeSequence = seq;`
+          : `var seq = app.project.activeSequence;
+             if (!seq) return __error("No active sequence");`;
+
         const script = buildToolScript(`
-          var seq = app.project.activeSequence;
-          if (!seq) return __error("No active sequence");
+          ${seqLookup}
           if (typeof seq.createCaptionTrack !== "function") {
             return __error("createCaptionTrack is not available in this Premiere ExtendScript runtime");
           }
@@ -1288,7 +1307,182 @@ export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionTo
           
           var result = seq.createCaptionTrack(item, ${startSeconds}, ${format});
           if (!result) return __error("Failed to create caption track");
-          return __result({ created: true, item: item.name, startSeconds: ${startSeconds}, format: "${escapeForExtendScript(requestedFormat)}" });
+          return __result({
+            created: true,
+            nativeCaptionTrack: true,
+            method: "Sequence.createCaptionTrack",
+            methodReturn: result,
+            sequenceName: seq.name,
+            sequenceId: seq.sequenceID,
+            item: item.name,
+            itemNodeId: item.nodeId,
+            startSeconds: ${startSeconds},
+            format: "${escapeForExtendScript(requestedFormat)}",
+            formatConstant: "${escapeForExtendScript(format)}",
+            captionTracksCollectionExposed: typeof seq.captionTracks !== "undefined",
+            note: "Premiere Pro 2026 CEP/ExtendScript creates native caption tracks via createCaptionTrack but does not expose caption track items as video clips."
+          });
+        `);
+        return sendCommand(script, bridgeOptions);
+      },
+    },
+
+    inspect_native_caption_sequence: {
+      description:
+        "Read-only inspection for native-caption support and caption-like PNG overlays on a sequence.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          sequence_id: {
+            type: "string",
+            description: "Optional sequence name or ID. Uses the active sequence if omitted.",
+          },
+          caption_item_id: {
+            type: "string",
+            description: "Optional caption sidecar ProjectItem node ID or name to include in the report.",
+          },
+        },
+      },
+      handler: async (args: { sequence_id?: string; caption_item_id?: string }) => {
+        const seqLookup = args.sequence_id
+          ? `var seq = __findSequence("${escapeForExtendScript(args.sequence_id)}");
+             if (!seq) return __error("Sequence not found: ${escapeForExtendScript(args.sequence_id)}");`
+          : `var seq = app.project.activeSequence;
+             if (!seq) return __error("No active sequence");`;
+        const captionItemLookup = args.caption_item_id
+          ? `"${escapeForExtendScript(args.caption_item_id)}"`
+          : "null";
+
+        const script = buildToolScript(`
+          ${seqLookup}
+
+          function __isCaptionSidecarName(name) {
+            var lower = String(name || "").toLowerCase();
+            var extensions = [".srt", ".vtt", ".scc", ".mcc", ".stl"];
+            for (var e = 0; e < extensions.length; e++) {
+              if (lower.substr(lower.length - extensions[e].length) === extensions[e]) return true;
+            }
+            return false;
+          }
+
+          function __isCaptionPngOverlay(clip) {
+            var name = "";
+            var mediaPath = "";
+            try { name = String(clip.name || ""); } catch(e) {}
+            try {
+              if (clip.projectItem && clip.projectItem.getMediaPath) {
+                mediaPath = String(clip.projectItem.getMediaPath() || "");
+              }
+            } catch(e2) {}
+            return name.indexOf("MCP_caption_text_overlay_") === 0 ||
+              mediaPath.indexOf("MCP_caption_text_overlay_") !== -1;
+          }
+
+          function __scanVideoTracks(sequence) {
+            var overlays = [];
+            var videoTrackClipCounts = [];
+            for (var t = 0; t < sequence.videoTracks.numTracks; t++) {
+              var track = sequence.videoTracks[t];
+              videoTrackClipCounts.push(track.clips.numItems);
+              for (var c = 0; c < track.clips.numItems; c++) {
+                var clip = track.clips[c];
+                if (__isCaptionPngOverlay(clip)) {
+                  overlays.push({
+                    trackIndex: t,
+                    clipIndex: c,
+                    name: clip.name,
+                    projectItemName: clip.projectItem ? clip.projectItem.name : null,
+                    startSeconds: clip.start ? __ticksToSeconds(clip.start.ticks) : null,
+                    endSeconds: clip.end ? __ticksToSeconds(clip.end.ticks) : null
+                  });
+                }
+              }
+            }
+            return {
+              videoTrackClipCounts: videoTrackClipCounts,
+              captionPngOverlayCount: overlays.length,
+              captionPngOverlaySamples: overlays.slice(0, 12)
+            };
+          }
+
+          function __findCaptionItems(root, requested) {
+            var matches = [];
+            if (!root) root = app.project.rootItem;
+            for (var i = 0; i < root.children.numItems; i++) {
+              var item = root.children[i];
+              var itemMatches = !requested || item.nodeId === requested || item.name === requested;
+              if (itemMatches && __isCaptionSidecarName(item.name)) {
+                var entry = {
+                  name: item.name,
+                  nodeId: item.nodeId,
+                  type: item.type,
+                  mediaPath: null
+                };
+                try { entry.mediaPath = item.getMediaPath(); } catch(e) {}
+                matches.push(entry);
+              }
+              if (item.type === 2) {
+                var childMatches = __findCaptionItems(item, requested);
+                for (var c = 0; c < childMatches.length; c++) matches.push(childMatches[c]);
+              }
+            }
+            return matches;
+          }
+
+          function __captionApiProbe(sequence) {
+            var probe = {
+              createCaptionTrack: typeof sequence.createCaptionTrack,
+              exportCaptionTrack: typeof sequence.exportCaptionTrack,
+              exportCaptions: typeof sequence.exportCaptions,
+              exportCaption: typeof sequence.exportCaption,
+              captionTracksType: typeof sequence.captionTracks,
+              captionsType: typeof sequence.captions,
+              captionTracksNumTracks: null,
+              captionsNumItems: null
+            };
+            try { probe.captionTracksNumTracks = sequence.captionTracks ? sequence.captionTracks.numTracks : null; } catch(e) { probe.captionTracksNumTracksError = e.toString(); }
+            try { probe.captionsNumItems = sequence.captions ? sequence.captions.numItems : null; } catch(e2) { probe.captionsNumItemsError = e2.toString(); }
+            return probe;
+          }
+
+          function __qeCaptionApiProbe() {
+            var probe = { available: false };
+            try {
+              app.enableQE();
+              var qeSeq = qe.project.getActiveSequence();
+              probe.available = !!qeSeq;
+              if (qeSeq) {
+                var names = ["numCaptionTracks", "getCaptionTrackAt", "getCaptionTrackCount", "getSubtitleTrackAt", "getCaptions", "getCaptionAt"];
+                probe.methods = {};
+                for (var i = 0; i < names.length; i++) {
+                  try { probe.methods[names[i]] = typeof qeSeq[names[i]]; } catch(e) { probe.methods[names[i]] = "error:" + e.toString(); }
+                }
+              }
+            } catch(e2) {
+              probe.error = e2.toString();
+            }
+            return probe;
+          }
+
+          var trackScan = __scanVideoTracks(seq);
+          return __result({
+            readOnly: true,
+            sequence: {
+              name: seq.name,
+              id: seq.sequenceID,
+              videoTrackCount: seq.videoTracks ? seq.videoTracks.numTracks : null,
+              audioTrackCount: seq.audioTracks ? seq.audioTracks.numTracks : null
+            },
+            captionApi: __captionApiProbe(seq),
+            qeCaptionApi: __qeCaptionApiProbe(),
+            videoTrackClipCounts: trackScan.videoTrackClipCounts,
+            captionPngOverlayCount: trackScan.captionPngOverlayCount,
+            captionPngOverlaySamples: trackScan.captionPngOverlaySamples,
+            captionSidecarItems: __findCaptionItems(app.project.rootItem, ${captionItemLookup}),
+            directCaptionItemReadAvailable: false,
+            nativeCaptionProof:
+              "Use this read-only probe with create_caption_track results. In this Premiere CEP runtime native captions are created by Sequence.createCaptionTrack returning true; caption tracks are not exposed as video clips or as a readable captionTracks collection."
+          });
         `);
         return sendCommand(script, bridgeOptions);
       },

@@ -6,7 +6,7 @@
 
 **Give AI full control over Adobe Premiere Pro.**
 
-301 tools across 28 modules — the most comprehensive MCP server for video editing.
+302 tools across 28 modules — the most comprehensive MCP server for video editing.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org)
@@ -27,7 +27,7 @@ An [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that l
 "Add the B-roll clips to V2, apply a cross dissolve between each, color correct them to match the A-roll, and export a 1080p ProRes."
 ```
 
-The AI handles the workflow through 301 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro, plus UXP sidecar routing for Text panel transcript operations.
+The AI handles the workflow through 302 tools that cover nearly every ExtendScript and QE DOM API available in Premiere Pro, plus UXP sidecar routing for Text panel transcript operations.
 
 ---
 
@@ -274,7 +274,7 @@ The file-based IPC bridge is simple, reliable, and works across macOS and Window
 
 ---
 
-## Tools (301)
+## Tools (302)
 
 ### Discovery & Inspection (10 + 10)
 
@@ -533,7 +533,7 @@ premiere-pro-mcp/
 ├── src/
 │   ├── index.ts                 # Entry point — stdio transport setup
 │   ├── http-server.ts           # Entry point — HTTP/SSE transport (Fly.io / remote)
-│   ├── server.ts                # MCP server — registers all 301 tools + 2 resources
+│   ├── server.ts                # MCP server — registers all 302 tools + 2 resources
 │   ├── bridge/
 │   │   ├── file-bridge.ts       # File-based IPC (write .jsx, poll .json)
 │   │   ├── uxp-bridge.ts        # Optional localhost UXP sidecar poll/result bridge

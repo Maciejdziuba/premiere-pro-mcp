@@ -193,12 +193,12 @@ describe("Tool Module Structure", () => {
 });
 
 describe("Total Tool Count", () => {
-  it("all modules together have 301 tools", () => {
+  it("all modules together have 302 tools", () => {
     let total = 0;
     for (const mod of ALL_MODULES) {
       total += Object.keys(mod.getter(bridgeOptions)).length;
     }
-    expect(total).toBe(301);
+    expect(total).toBe(302);
   });
 
   it("there are 28 modules", () => {
@@ -878,15 +878,57 @@ describe("Tool Handler Behavior", () => {
       const tools = getCaptionTools(bridgeOptions);
       const toolNames = Object.keys(tools);
       expect(toolNames).toContain("create_caption_track");
+      expect(toolNames).toContain("inspect_native_caption_sequence");
       expect(toolNames).toContain("parse_transcript_json_file");
       expect(toolNames).toContain("has_text_panel_transcript");
       expect(toolNames).toContain("import_text_panel_transcript");
 
-      await (tools.create_caption_track.handler as any)({ item_id: "my-srt-file" });
+      await (tools.create_caption_track.handler as any)({
+        sequence_id: "Caption Target",
+        item_id: "my-srt-file",
+        start_seconds: 1.25,
+        caption_format: "608",
+      });
       const script = mockedSendCommand.mock.calls[0][0];
       expect(script).toContain("__result");
+      expect(script).toContain('__findSequence("Caption Target")');
+      expect(script).toContain("app.project.activeSequence = seq");
       expect(script).toContain("my-srt-file");
       expect(script).toContain("createCaptionTrack");
+      expect(script).toContain("seq.createCaptionTrack(item, 1.25, Sequence.CAPTION_FORMAT_608)");
+      expect(script).toContain('nativeCaptionTrack: true');
+      expect(script).toContain('method: "Sequence.createCaptionTrack"');
+      expect(script).toContain("captionTracksCollectionExposed");
+    });
+
+    it("create_caption_track validates start_seconds before bridge I/O", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+
+      const result = await (tools.create_caption_track.handler as any)({
+        item_id: "my-srt-file",
+        start_seconds: -1,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("start_seconds");
+      expect(mockedSendCommand).not.toHaveBeenCalled();
+    });
+
+    it("inspect_native_caption_sequence reports caption API surface and PNG overlay clips", async () => {
+      const tools = getCaptionTools(bridgeOptions);
+
+      await (tools.inspect_native_caption_sequence.handler as any)({
+        sequence_id: "Caption Target",
+        caption_item_id: "captions.srt",
+      });
+      const script = mockedSendCommand.mock.calls[0][0];
+
+      expect(script).toContain('__findSequence("Caption Target")');
+      expect(script).toContain("MCP_caption_text_overlay_");
+      expect(script).toContain("captionPngOverlayCount");
+      expect(script).toContain("captionSidecarItems");
+      expect(script).toContain("directCaptionItemReadAvailable: false");
+      expect(script).toContain("Sequence.createCaptionTrack returning true");
     });
 
     it("parse_srt_file reads local SRT without bridge I/O", async () => {
