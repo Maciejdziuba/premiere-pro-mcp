@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -11,6 +11,8 @@ const projectRoot = path.resolve(__dirname, "..");
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const SCRATCH_PREFIX = "MCP_TEST_VALIDATE_";
+const DEFAULT_BRIDGE_DIR = path.join(os.tmpdir(), "premiere-mcp-bridge");
+const DEFAULT_UXP_STATUS_FILE = "uxp-transcript-status.json";
 
 function printHelp() {
   console.log(`Run a safe Premiere validation sweep.
@@ -24,6 +26,8 @@ Usage:
 
 Options:
   --temp-dir <path>        Bridge temp dir. Defaults to PREMIERE_TEMP_DIR or OS bridge default.
+  --uxp-status-file <path> Read UXP transcript status from this JSON file.
+                           Defaults to <temp-dir>/uxp-transcript-status.json.
   --timeout-ms <number>    Per-command timeout. Defaults to ${DEFAULT_TIMEOUT_MS}.
   --include-project        Also plan/run read-only project/timeline inspection tools.
   --json                   Print machine-readable JSON instead of text lines.
@@ -38,12 +42,16 @@ The default sweep is dry-run/read-only and never imports dist or contacts
 Premiere. Read-only live mode does not install CEP, change global config, enable
 QE, save projects, edit timelines, enqueue exports, or modify media. Live probes
 warn and require --confirm-live-probes before creating MCP_TEST_VALIDATE_*
-scratch project items/sequences. They never save, export, delete, or start AME.`);
+scratch project items/sequences. They never save, export, delete, or start AME.
+
+UXP transcript status is read from a local status file only. The sweep does not
+load UXP, call Adobe UXP Developer Tool, or invoke UXP APIs itself.`);
 }
 
 function parseArgs(argv) {
   const options = {
     tempDir: process.env.PREMIERE_TEMP_DIR,
+    uxpStatusFile: process.env.PREMIERE_UXP_STATUS_FILE,
     timeoutMs: DEFAULT_TIMEOUT_MS,
     includeProject: false,
     json: false,
@@ -80,6 +88,10 @@ function parseArgs(argv) {
       options.tempDir = argv[++i];
     } else if (arg.startsWith("--temp-dir=")) {
       options.tempDir = arg.slice("--temp-dir=".length);
+    } else if (arg === "--uxp-status-file") {
+      options.uxpStatusFile = argv[++i];
+    } else if (arg.startsWith("--uxp-status-file=")) {
+      options.uxpStatusFile = arg.slice("--uxp-status-file=".length);
     } else if (arg === "--timeout-ms") {
       options.timeoutMs = Number.parseInt(argv[++i], 10);
     } else if (arg.startsWith("--timeout-ms=")) {
@@ -108,6 +120,107 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function effectiveTempDir(options) {
+  return options.tempDir || process.env.PREMIERE_TEMP_DIR || DEFAULT_BRIDGE_DIR;
+}
+
+function effectiveUxpStatusFile(options) {
+  return options.uxpStatusFile || process.env.PREMIERE_UXP_STATUS_FILE ||
+    path.join(effectiveTempDir(options), DEFAULT_UXP_STATUS_FILE);
+}
+
+function readBoolean(value) {
+  return value === true ? true : value === false ? false : null;
+}
+
+function inspectUxpTranscriptStatus(options) {
+  const statusFile = effectiveUxpStatusFile(options);
+  const base = {
+    name: "uxp_transcript_bridge_status",
+    source: "uxp-panel",
+    readOnly: true,
+    live: false,
+    contactsPremiere: false,
+    statusFile,
+    expectedWriter: "optional external UXP status writer",
+    requiredFor: [
+      "Text panel transcript import/export",
+      "TextSegments import",
+      "Transcript createImportTextSegmentsAction",
+    ],
+  };
+
+  if (!existsSync(statusFile)) {
+    return {
+      ...base,
+      status: "offline",
+      online: false,
+      label: "OFFLINE",
+      summary: "Optional UXP transcript status file is missing. This offline-only check does not read the live MCP UXP bridge.",
+    };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(statusFile, "utf-8"));
+  } catch (error) {
+    return {
+      ...base,
+      status: "invalid",
+      online: false,
+      label: "INVALID",
+      summary: `UXP transcript status file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  const payload = parsed && typeof parsed === "object" ? parsed : {};
+  const transcript = payload.transcript && typeof payload.transcript === "object" ? payload.transcript :
+    payload.textPanelTranscript && typeof payload.textPanelTranscript === "object" ? payload.textPanelTranscript :
+      {};
+  const explicitOnline = readBoolean(payload.online) ?? readBoolean(transcript.online);
+  const statusText = typeof payload.status === "string" ? payload.status :
+    typeof transcript.status === "string" ? transcript.status : "";
+  const hasPremiereProModule = readBoolean(payload.hasPremiereProModule) ?? readBoolean(transcript.hasPremiereProModule);
+  const hasTranscriptApis = readBoolean(payload.hasTranscriptApis) ?? readBoolean(transcript.hasTranscriptApis);
+  const online = explicitOnline !== null ? explicitOnline : statusText.toLowerCase() === "online";
+
+  let ageSeconds = null;
+  try {
+    const stats = existsSync(statusFile) ? statSync(statusFile) : null;
+    if (stats) ageSeconds = Math.max(0, Math.round((Date.now() - stats.mtimeMs) / 1000));
+  } catch {
+    ageSeconds = null;
+  }
+
+  const stale = typeof ageSeconds === "number" && ageSeconds > 120;
+  const status = stale ? "stale" : online ? "online" : "offline";
+
+  return {
+    ...base,
+    status,
+    online: online && !stale,
+    label: status.toUpperCase(),
+    ageSeconds,
+    panel: typeof payload.panel === "string" ? payload.panel : "uxp-panel",
+    bridgeKind: typeof payload.bridgeKind === "string" ? payload.bridgeKind : "UXP",
+    updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : null,
+    hasPremiereProModule,
+    hasTranscriptApis,
+    supportedApis: Array.isArray(transcript.supportedApis) ? transcript.supportedApis :
+      Array.isArray(payload.supportedApis) ? payload.supportedApis : [],
+    summary: stale
+      ? "UXP transcript status file is stale. Refresh the optional status writer before trusting this offline label."
+      : online
+        ? "UXP transcript status file reports transcript features online."
+        : "UXP transcript status file reports transcript features offline.",
+  };
+}
+
+function printUxpStatus(status) {
+  console.log(`UXP transcript status: ${status.label} (${status.summary})`);
+  console.log(`  status file: ${status.statusFile}`);
 }
 
 function sourceText(relativePath) {
@@ -154,22 +267,28 @@ function runStaticContractChecks() {
     recommendation: "Keep caption creation behind get_caption_api_capabilities/live probe results.",
   }));
 
-  const transcriptUxPLimitIsExplicit =
-    captionsSource.includes("unsupportedTextPanelResult") &&
-    captionsSource.includes("currentBridgeCanInvokeUxpApis: false") &&
+  const transcriptUxpSidecarIsExplicit =
+    captionsSource.includes("sendUxpCommand") &&
+    captionsSource.includes("has_text_panel_transcript") &&
+    captionsSource.includes("textPanel.hasTranscript") &&
+    captionsSource.includes("textPanel.importTranscript") &&
+    captionsSource.includes("textPanel.exportTranscript") &&
+    sourceText("src/bridge/uxp-bridge.ts").includes("GET") &&
+    sourceText("src/bridge/uxp-bridge.ts").includes("/uxp/poll") &&
+    sourceText("src/bridge/uxp-bridge.ts").includes("/uxp/result") &&
     captionsSource.includes("parse_transcript_json_file") &&
     captionsSource.includes("write_transcript_json_file");
   checks.push(contractCheck({
-    id: "transcript_capability_not_advertised",
+    id: "transcript_uxp_sidecar_bridge",
     area: "captions",
-    status: transcriptUxPLimitIsExplicit ? "pass" : "known_gap",
+    status: transcriptUxpSidecarIsExplicit ? "pass" : "known_gap",
     severity: "high",
-    title: "Text panel transcript support is separated between local JSON helpers and explicit UXP-only unsupported operations.",
-    evidence: transcriptUxPLimitIsExplicit
-      ? "src/tools/captions.ts has local transcript JSON helpers, capability reporting, and explicit CEP/UXP unsupported errors."
-      : "Transcript wording exists without the expected CEP/UXP limitation guards.",
-    expected: "Local transcript JSON preparation may be supported, but Text panel import/export and auto-transcribe must return explicit unsupported errors under CEP.",
-    recommendation: "Keep UXP-only Text panel operations clearly labeled unsupported unless a UXP bridge is added.",
+    title: "Text panel transcript tools route through one local UXP poll/result sidecar bridge.",
+    evidence: transcriptUxpSidecarIsExplicit
+      ? "src/tools/captions.ts routes Text panel transcript has/import/export through src/bridge/uxp-bridge.ts."
+      : "Transcript wording exists without the expected UXP sidecar command routing.",
+    expected: "Local transcript JSON preparation stays local, CEP caption sidecars stay on ExtendScript, and Text panel import/export use the single UXP sidecar.",
+    recommendation: "Keep UXP transcript operations wired to the canonical UxpBridge instead of adding duplicate sidecar implementations.",
   }));
 
   const projectItemInOutUsesTimeTicks =
@@ -541,6 +660,7 @@ async function main() {
 
   const plannedSteps = stepPlan(options.includeProject);
   const contractSummary = runStaticContractChecks();
+  const uxpStatus = inspectUxpTranscriptStatus(options);
 
   if (options.dryRun) {
     const payload = {
@@ -548,6 +668,7 @@ async function main() {
       contactsPremiere: false,
       includeProject: options.includeProject,
       steps: plannedSteps,
+      uxpStatus,
       liveProbePlan: [
         "create MCP_TEST_VALIDATE_* scratch sequence",
         "import MCP_TEST_VALIDATE_* caption sidecar and attempt caption track creation",
@@ -566,6 +687,7 @@ async function main() {
       for (const step of plannedSteps) {
         console.log(`- ${step.name} (${step.source}, ${step.live ? "live read-only" : "local"})`);
       }
+      printUxpStatus(uxpStatus);
       printContractChecks(contractSummary);
     }
     if (options.strictContract && !contractSummary.ok) {
@@ -588,6 +710,7 @@ async function main() {
         ok: liveSummary.ok,
         mode: "live_probes",
         contractSummary,
+        uxpStatus,
         liveSummary,
       }, null, 2));
     }
@@ -607,6 +730,10 @@ async function main() {
   const results = [];
   let failureCount = 0;
 
+  if (!options.json) {
+    printUxpStatus(uxpStatus);
+  }
+
   for (const step of plannedSteps) {
     const ok = await runToolStep({ ...step, args: {}, readOnly: true }, toolMaps, options, results);
     if (!ok) failureCount++;
@@ -619,6 +746,7 @@ async function main() {
     timeoutMs: options.timeoutMs,
     tempDir: options.tempDir || null,
     contractSummary,
+    uxpStatus,
     failures: failureCount,
     results,
   };

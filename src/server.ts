@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { BridgeOptions } from "./bridge/file-bridge.js";
+import type { UxpBridge } from "./bridge/uxp-bridge.js";
 import { getDiscoveryTools } from "./tools/discovery.js";
 import { getProjectTools } from "./tools/project.js";
 import { getMediaTools } from "./tools/media.js";
@@ -99,6 +100,10 @@ interface ToolDef {
   handler: (args: any) => Promise<{ success: boolean; data?: unknown; error?: string }>;
 }
 
+export interface ServerOptions {
+  uxpBridge?: UxpBridge;
+}
+
 /**
  * Convert a JSON Schema-style parameters object to a Zod shape for MCP SDK registration.
  */
@@ -150,7 +155,7 @@ function jsonSchemaToZodShape(params: Record<string, unknown>): Record<string, z
   return shape;
 }
 
-export function createServer(bridgeOptions: BridgeOptions): McpServer {
+export function createServer(bridgeOptions: BridgeOptions, options: ServerOptions = {}): McpServer {
   const server = new McpServer({
     name: "premiere-pro-mcp",
     version: "1.0.0",
@@ -181,9 +186,9 @@ export function createServer(bridgeOptions: BridgeOptions): McpServer {
     ...getSourceMonitorTools(bridgeOptions),
     ...getTrackTargetingTools(bridgeOptions),
     ...getUtilityTools(bridgeOptions),
-    ...getHealthTools(bridgeOptions),
+    ...getHealthTools(bridgeOptions, { uxpBridge: options.uxpBridge }),
     ...getWorkspaceTools(bridgeOptions),
-    ...getCaptionTools(bridgeOptions),
+    ...getCaptionTools(bridgeOptions, { uxpBridge: options.uxpBridge }),
     ...getPlaybackTools(bridgeOptions),
     ...getProjectManagerTools(bridgeOptions),
   };

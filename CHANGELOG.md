@@ -8,12 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Expanded the captions module to **13 tools** with local Adobe transcript JSON validation/conversion helpers, CEP/UXP capability diagnostics, and explicit unsupported Text panel/Speech-to-Text tools.
+- Expanded the captions module to **14 tools** with local Adobe transcript JSON validation/conversion helpers, CEP caption diagnostics, and UXP sidecar Text panel transcript has/import/export tools.
+- Added UXP sidecar health tools for status, ping, and capability checks through the `GET /uxp/poll` and `POST /uxp/result` protocol.
 - Added caption-like PNG text overlay tooling for styled bottom text that is explicitly separate from real Premiere caption tracks.
 
 ### Changed
 
-- Updated catalog validation, diagnostics labels, and public metadata for **297 tools** across **28 modules**.
+- Updated catalog validation, diagnostics labels, and public metadata for **301 tools** across **28 modules**.
 - Preserved runtime wrapper fixes for Auto Reframe, sequence in/out and work-area timing, and guarded frame-capture capability reporting.
 
 ## [1.0.0] - 2025-02-26

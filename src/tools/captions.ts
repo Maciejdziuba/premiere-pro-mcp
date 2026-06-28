@@ -1,5 +1,6 @@
 import { buildToolScript, escapeForExtendScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions } from "../bridge/file-bridge.js";
+import { getDisabledUxpBridgeStatus, sendUxpCommand, type UxpBridge } from "../bridge/uxp-bridge.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 interface NormalizedSrtCaption {
@@ -387,7 +388,44 @@ function unsupportedTextPanelResult(operation: string) {
   };
 }
 
-export function getCaptionTools(bridgeOptions: BridgeOptions) {
+function extractObjectData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
+}
+
+function extractHasTranscript(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  const data = extractObjectData(value);
+  if (typeof data.hasTranscript === "boolean") return data.hasTranscript;
+  if (typeof data.has_transcript === "boolean") return data.has_transcript;
+  return null;
+}
+
+function extractTranscript(value: unknown): AdobeTranscript | null {
+  const data = extractObjectData(value);
+  const candidate = data.transcript ?? data.transcriptJson ?? data.transcript_json ?? value;
+  try {
+    if (typeof candidate === "string") {
+      return normalizeTranscriptJson(JSON.parse(candidate));
+    }
+    return normalizeTranscriptJson(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function uxpTranscriptError(operation: string, error: string | undefined): string {
+  return [
+    `${operation} failed: ${error || "UXP bridge unavailable"}.`,
+    "Start the MCP server with PREMIERE_UXP_BRIDGE_ENABLED=true, load uxp-panel/manifest.json in Adobe UXP Developer Tool, and keep the panel polling GET /uxp/poll.",
+  ].join(" ");
+}
+
+export interface CaptionToolOptions {
+  uxpBridge?: UxpBridge;
+}
+
+export function getCaptionTools(bridgeOptions: BridgeOptions, options: CaptionToolOptions = {}) {
   return {
     parse_srt_file: {
       description:
@@ -783,6 +821,7 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
         "Report caption and transcript APIs exposed by this CEP/ExtendScript bridge without editing the project.",
       parameters: {},
       handler: async () => {
+        const uxpBridgeStatus = options.uxpBridge?.getStatus() ?? getDisabledUxpBridgeStatus();
         const script = buildToolScript(`
           var seq = app.project.activeSequence;
           var sequenceCapabilities = {
@@ -830,13 +869,78 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
             ]
           });
         `);
-        return sendCommand(script, bridgeOptions);
+        const result = await sendCommand(script, bridgeOptions);
+        if (!result.success) return result;
+        return {
+          success: true,
+          data: {
+            ...extractObjectData(result.data),
+            uxpSidecarBridge: {
+              enabled: uxpBridgeStatus.enabled,
+              running: uxpBridgeStatus.running,
+              url: uxpBridgeStatus.url,
+              pollPath: uxpBridgeStatus.pollPath,
+              resultPath: uxpBridgeStatus.resultPath,
+              panelOnline: uxpBridgeStatus.panelOnline,
+              pendingCommands: uxpBridgeStatus.pendingCommands,
+              inFlightCommands: uxpBridgeStatus.inFlightCommands,
+              currentBridgeCanInvokeUxpApis: uxpBridgeStatus.running && uxpBridgeStatus.panelOnline,
+            },
+          },
+        };
+      },
+    },
+
+    has_text_panel_transcript: {
+      description:
+        "Check whether a clip ProjectItem has a Text panel transcript through the Premiere UXP sidecar bridge.",
+      parameters: {
+        type: "object" as const,
+        properties: {
+          clip_project_item_id: {
+            type: "string",
+            description: "Project item node ID or name of the clip to check.",
+          },
+        },
+        required: ["clip_project_item_id"],
+      },
+      handler: async (args: { clip_project_item_id: string }) => {
+        const result = await sendUxpCommand(options.uxpBridge, "textPanel.hasTranscript", {
+          clipProjectItemId: args.clip_project_item_id,
+        });
+        if (!result.success) {
+          return {
+            success: false,
+            error: uxpTranscriptError("Text panel transcript check", result.error),
+          };
+        }
+
+        const hasTranscript = extractHasTranscript(result.data);
+        if (hasTranscript === null) {
+          return {
+            success: false,
+            error:
+              "UXP bridge returned success but did not include a boolean hasTranscript value. " +
+              "Expected result data like { hasTranscript: true|false }; refusing to claim transcript state.",
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            clipProjectItemId: args.clip_project_item_id,
+            hasTranscript,
+            requiresPremiere: true,
+            requiresCepBridge: false,
+            requiresUxpPanel: true,
+          },
+        };
       },
     },
 
     import_text_panel_transcript: {
       description:
-        "Unsupported in this CEP bridge: import Adobe Text panel transcript JSON into a selected clip requires Premiere UXP.",
+        "Import Adobe Text panel transcript JSON into a clip through the Premiere UXP sidecar bridge.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -852,23 +956,46 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
         required: ["transcript_path", "clip_project_item_id"],
       },
       handler: async (args: { transcript_path: string; clip_project_item_id: string }) => {
+        let transcript: AdobeTranscript;
         try {
-          readTranscriptJsonFile(args.transcript_path);
+          transcript = readTranscriptJsonFile(args.transcript_path);
         } catch (error) {
           return {
             success: false,
             error: error instanceof Error ? error.message : String(error),
           };
         }
-        return unsupportedTextPanelResult(
-          `Importing Text panel transcript JSON for clip ${args.clip_project_item_id}`
-        );
+
+        const result = await sendUxpCommand(options.uxpBridge, "textPanel.importTranscript", {
+          clipProjectItemId: args.clip_project_item_id,
+          transcript,
+        });
+        if (!result.success) {
+          return {
+            success: false,
+            error: uxpTranscriptError("Text panel transcript import", result.error),
+          };
+        }
+
+        return {
+          success: true,
+          data: {
+            imported: true,
+            clipProjectItemId: args.clip_project_item_id,
+            transcriptPath: args.transcript_path,
+            ...summarizeTranscript(transcript),
+            uxpResult: result.data ?? null,
+            requiresPremiere: true,
+            requiresCepBridge: false,
+            requiresUxpPanel: true,
+          },
+        };
       },
     },
 
     export_text_panel_transcript: {
       description:
-        "Unsupported in this CEP bridge: export a clip's Text panel transcript JSON requires Premiere UXP.",
+        "Export a clip's Text panel transcript JSON through the Premiere UXP sidecar bridge.",
       parameters: {
         type: "object" as const,
         properties: {
@@ -878,12 +1005,57 @@ export function getCaptionTools(bridgeOptions: BridgeOptions) {
           },
           output_path: {
             type: "string",
-            description: "Full path where a UXP implementation would write transcript JSON.",
+            description: "Full path where the exported transcript JSON should be written.",
+          },
+          overwrite: {
+            type: "boolean",
+            description: "Overwrite an existing transcript JSON file (default: false).",
           },
         },
         required: ["clip_project_item_id", "output_path"],
       },
-      handler: async () => unsupportedTextPanelResult("Exporting Text panel transcript JSON"),
+      handler: async (args: { clip_project_item_id: string; output_path: string; overwrite?: boolean }) => {
+        if (existsSync(args.output_path) && !args.overwrite) {
+          return {
+            success: false,
+            error: `Output file already exists: ${args.output_path}. Pass overwrite=true to replace it.`,
+          };
+        }
+
+        const result = await sendUxpCommand(options.uxpBridge, "textPanel.exportTranscript", {
+          clipProjectItemId: args.clip_project_item_id,
+        });
+        if (!result.success) {
+          return {
+            success: false,
+            error: uxpTranscriptError("Text panel transcript export", result.error),
+          };
+        }
+
+        const transcript = extractTranscript(result.data);
+        if (!transcript) {
+          return {
+            success: false,
+            error:
+              "UXP bridge returned success but did not include valid Adobe transcript JSON. " +
+              "Expected result data like { transcript: { language, speakers, segments } }; refusing to write a false transcript export.",
+          };
+        }
+
+        writeFileSync(args.output_path, JSON.stringify(transcript, null, 2) + "\n", "utf-8");
+        return {
+          success: true,
+          data: {
+            exported: true,
+            clipProjectItemId: args.clip_project_item_id,
+            outputPath: args.output_path,
+            ...summarizeTranscript(transcript),
+            requiresPremiere: true,
+            requiresCepBridge: false,
+            requiresUxpPanel: true,
+          },
+        };
+      },
     },
 
     create_captions_from_text_panel_transcript: {

@@ -1,5 +1,6 @@
 import { buildToolScript } from "../bridge/script-builder.js";
 import { sendCommand, BridgeOptions, getTempDir } from "../bridge/file-bridge.js";
+import { getDisabledUxpBridgeStatus, sendUxpCommand, type UxpBridge } from "../bridge/uxp-bridge.js";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -113,7 +114,18 @@ function inspectBridgeDirectory(tempDir: string) {
   };
 }
 
-export function getHealthTools(bridgeOptions: BridgeOptions) {
+export interface HealthToolOptions {
+  uxpBridge?: UxpBridge;
+}
+
+function uxpOfflineError(operation: string, error: string | undefined): string {
+  return [
+    `${operation} failed: ${error || "UXP bridge unavailable"}.`,
+    "Start the MCP server with PREMIERE_UXP_BRIDGE_ENABLED=true, load uxp-panel/manifest.json in Adobe UXP Developer Tool, and keep the panel polling GET /uxp/poll.",
+  ].join(" ");
+}
+
+export function getHealthTools(bridgeOptions: BridgeOptions, options: HealthToolOptions = {}) {
   return {
     fork_ping: {
       description: "Fork-local health check that does not contact Premiere Pro. Returns static fork and repo information.",
@@ -174,6 +186,7 @@ export function getHealthTools(bridgeOptions: BridgeOptions) {
               bridgeFileSamples: directory.bridgeFiles,
               sampleLimit: MAX_BRIDGE_FILE_SAMPLES,
             },
+            uxpBridge: options.uxpBridge?.getStatus() ?? getDisabledUxpBridgeStatus(),
             environment: {
               nodeVersion: process.version,
               platform: process.platform,
@@ -185,6 +198,77 @@ export function getHealthTools(bridgeOptions: BridgeOptions) {
             warnings,
             requiresPremiere: false,
             requiresCepBridge: false,
+          },
+        };
+      },
+    },
+
+    get_uxp_bridge_status: {
+      description: "Read-only status for the local UXP sidecar command bridge. Does not contact Premiere or mutate a project.",
+      parameters: {},
+      handler: async () => ({
+        success: true,
+        data: {
+          readOnly: true,
+          ...(options.uxpBridge?.getStatus() ?? getDisabledUxpBridgeStatus()),
+          requiresPremiere: false,
+          requiresCepBridge: false,
+          requiresUxpPanel: true,
+        },
+      }),
+    },
+
+    uxp_ping: {
+      description: "Ping the Premiere UXP sidecar panel through the local poll/result bridge. Returns an offline/install error if the UXP panel is not polling.",
+      parameters: {},
+      handler: async () => {
+        const result = await sendUxpCommand(options.uxpBridge, "ping", {});
+        if (!result.success) {
+          return {
+            success: false,
+            error: uxpOfflineError("UXP ping", result.error),
+          };
+        }
+        return {
+          success: true,
+          data: {
+            ok: true,
+            bridge: "UXP sidecar",
+            result: result.data ?? null,
+            requiresPremiere: true,
+            requiresCepBridge: false,
+            requiresUxpPanel: true,
+          },
+        };
+      },
+    },
+
+    get_uxp_bridge_capabilities: {
+      description: "Ask the Premiere UXP sidecar panel for supported UXP APIs and transcript capabilities through the poll/result bridge.",
+      parameters: {},
+      handler: async () => {
+        const result = await sendUxpCommand(options.uxpBridge, "capabilities", {});
+        if (!result.success) {
+          return {
+            success: false,
+            error: uxpOfflineError("UXP capability check", result.error),
+          };
+        }
+        return {
+          success: true,
+          data: {
+            bridge: "UXP sidecar",
+            capabilities: result.data ?? {},
+            transcriptApis: [
+              "Transcript.hasTranscript(clipProjectItem)",
+              "Transcript.exportToJSON(clipProjectItem)",
+              "Transcript.importFromJSON(json)",
+              "Transcript.createImportTextSegmentsAction(textSegments, clipProjectItem)",
+              "Transcript.querySupportedLanguages()",
+            ],
+            requiresPremiere: true,
+            requiresCepBridge: false,
+            requiresUxpPanel: true,
           },
         };
       },

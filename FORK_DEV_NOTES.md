@@ -28,9 +28,27 @@ npm run validate:tools
 npm run diagnostics:sweep -- --dry-run
 ```
 
-`npm run validate:tools` imports the built `dist/tools/*.js` catalog, so run `npm run build` first. It validates the 288-tool catalog for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema property metadata.
+`npm run validate:tools` imports the built `dist/tools/*.js` catalog, so run `npm run build` first. It validates the 301-tool catalog for duplicate names, snake_case names, handler shape, required-property references, and basic JSON-schema property metadata.
 
-`npm run diagnostics:sweep -- --dry-run` verifies the runtime sweep command path without importing `dist/` or contacting Premiere.
+`npm run diagnostics:sweep -- --dry-run` verifies the runtime sweep command path without importing `dist/` or contacting Premiere. It also reports local UXP transcript status from `${PREMIERE_TEMP_DIR:-<os-temp>/premiere-mcp-bridge}/uxp-transcript-status.json`, or from `--uxp-status-file`.
+
+## Hybrid CEP + UXP Setup
+
+This branch keeps one MCP server and two Premiere panels:
+
+- `cep-plugin/`: the existing MCP Bridge panel. It executes ExtendScript/QE through file IPC and owns the broad MCP tool surface.
+- `uxp-panel/`: optional Premiere UXP panel. Load it manually with Adobe UXP Developer Tool when testing Premiere Pro 25+ Text panel transcript APIs.
+
+Run the helpers separately:
+
+```bash
+npm run install-cep
+npm run install-uxp
+```
+
+`install-uxp.sh` is only a UDT loading helper. It does not load the panel, edit Adobe settings, start Premiere, or mutate a project. In UXP Developer Tool, enable Developer Mode, choose **Add Plugin**, select `uxp-panel/manifest.json`, then use **Load** or **Load & Watch**.
+
+Start the MCP server with `PREMIERE_UXP_BRIDGE_ENABLED=true` when you want the localhost UXP sidecar at `http://127.0.0.1:17777`.
 
 ## Local MCP Config Example
 
@@ -103,6 +121,16 @@ npm run install-cep
 
 That script symlinks `cep-plugin/` into the Adobe CEP extensions folder and enables unsigned CEP extensions/debug mode. It changes user-level Adobe settings, so keep it out of automated setup.
 
+## UXP Panel Load Later
+
+UXP is Adobe's newer panel runtime. It is required for Text panel transcript APIs that the CEP bridge cannot invoke. When `uxp-panel/manifest.json` exists, run:
+
+```bash
+npm run install-uxp
+```
+
+Then use Adobe UXP Developer Tool to add that manifest and click **Load** or **Load & Watch**. The helper prints the steps; Adobe UDT still performs the actual load.
+
 ## How Tools Are Wired
 
 The flow is: MCP client → server → file bridge → CEP panel → ExtendScript in Premiere, and back.
@@ -113,6 +141,8 @@ The flow is: MCP client → server → file bridge → CEP panel → ExtendScrip
 - `src/bridge/script-builder.ts` prepends ES3 ExtendScript helpers and wraps generated code in an IIFE with try/catch.
 - `cep-plugin/main.js` is the CEP-side poller. It reads `.jsx` command files, runs them through `CSInterface.evalScript()`, and writes JSON responses.
 - `cep-plugin/host.jsx` is a small host-side ExtendScript file loaded by the panel.
+- `src/bridge/uxp-bridge.ts` is the optional localhost UXP poll/result sidecar.
+- `uxp-panel/` is a companion UXP panel for transcript-only Text panel commands. It should not replace CEP for ExtendScript/QE tools.
 
 ## Add A New Tool
 
@@ -146,6 +176,7 @@ git push origin main
 ## Risks
 
 - CEP install scripts modify user-level Adobe CEP extension folders and unsigned-extension debug settings.
+- UXP loading is manual through Adobe UXP Developer Tool; do not imply `install-uxp.sh` can load the panel automatically.
 - ExtendScript runs inside Premiere Pro and can modify open projects, files, timelines, media, and export queues.
 - Generated scripts must stay ES3-compatible; modern JavaScript syntax can fail in ExtendScript.
 - QE DOM calls use undocumented Premiere APIs. They enable key editing actions but can be version-sensitive, stateful, and harder to debug than the standard DOM.
